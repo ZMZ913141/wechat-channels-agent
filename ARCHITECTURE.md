@@ -153,6 +153,9 @@ wechannels/
   accounts.py                多账号管理
   proclock.py                两层锁：账号锁 + 档案锁
   materials.py               素材库数据层（含标签/去重/孤儿检测）
+  ledger.py                  发布记录（batch/target 三态模型，看板数据源）
+  stats.py                   统计聚合（口径集中在此，便于校验）
+  migrate.py                 旧 publish_history → ledger 的一次性迁移（幂等）
   publish.py                 发布编排（多账号串行 + 任务状态）
   publish_pw.py              确定性发布（Playwright 直填表单）
   launcher.py                有头浏览器打开 / 扫码登录
@@ -168,8 +171,9 @@ wechannels/
     views_library.py         维护页 / 目录导入
     views_accounts.py        账号管理
     views_publish.py         发布中心
+    views_dashboard.py       数据看板 + CSV 导出
     templates/               base + 7 页面 + partials + macros
-    static/                  app.css + 6 个独立 JS
+    static/                  app.css + JS；vendor/echarts.min.js（本地化，Apache-2.0）
 ```
 
 **为什么是 Jinja2 而不是字符串拼接**：早期 `app.py` 把路由、CSS、JS、HTML 混在
@@ -182,9 +186,10 @@ IDE 也无法为 HTML/JS 做语法高亮。现在模板与静态资源分离，C
 |---|---|---|
 | 定时发表/封面依赖 DOM 文本匹配 | 视频号改版可能失效 | 已做「未生效如实回报」+ 失败截图兜底 |
 | 发布为**串行**，多账号需排队 | 号多时耗时长 | 刻意不并行：并行会放大风控与带宽风险 |
+| 无播放量/点赞等数据 | 无法做内容效果分析 | **平台无接口**，只能看发布侧数据 |
 | 无 `secret_key`/CSRF | 若改 `host=0.0.0.0` 即任意文件读取 | 已加启动警告；保持绑 127.0.0.1 |
+| 状态持久化用 JSON 文件 | 并发写有理论风险 | ledger 已用「临时文件 + os.replace」原子写；单进程使用 |
 | 素材库无全文检索/缩略图缓存 | 素材上千后筛选变慢 | 现有标签+状态+关键词已够用 |
-| 状态持久化用 JSON 文件 | 并发写有理论风险 | 单进程使用，实际无影响 |
 
 ---
 

@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 
 from flask import redirect, render_template, request, url_for
 
@@ -24,6 +25,19 @@ def index():
     label_filter = request.args.get("label", "")
     q = request.args.get("q", "")
     sort = request.args.get("sort", "new")
+
+    # 批量上传结果提示：如实说清"入库几个、跳过几个"，否则用户会以为失败
+    flash = ""
+    fm = request.args.get("msg", "")
+    if fm.startswith("batch_upload:"):
+        parts = fm.split(":")
+        added = int(parts[1]) if len(parts) > 1 else 0
+        skipped = int(parts[2]) if len(parts) > 2 else 0
+        flash = (f'<div class="msg ok">✓ 已批量入库 <b>{added}</b> 条素材'
+                 f'{"（只有一条，已直接跳到编辑页补文案）" if added == 1 else ""}</div>')
+        if skipped:
+            flash += (f'<div class="msg bad">⚠ 有 {skipped} 个文件被跳过'
+                      f'（不是支持的视频格式，或保存失败）</div>')
 
     items = materials.load_materials(aid)
     if sf:
@@ -51,6 +65,7 @@ def index():
         items=[decorate(m) for m in items],
         sf=sf, label_filter=label_filter, q=q, sort=sort,
         all_label_names=[n for n, _ in materials.all_labels(aid)],
+        flash=flash,
         title="素材库",
     )
 
@@ -87,6 +102,72 @@ def _apply_uploads(data: dict) -> None:
         dest = os.path.join(dest_dir, safe)
         f.save(dest)
         data[field.replace("_file", "_path")] = dest
+
+
+@app.route("/materials/batch_upload", methods=["POST"])
+def materials_batch_upload():
+    """批量拖入：一次上传多个视频，每条自动建素材（标题取文件名）。
+
+    为什么单独开这个接口而不是复用 /materials/new：
+    批量场景下用户不该被迫为每个文件填一遍标题/文案/标签。
+    """
+    files = request.files.getlist("video_files")
+    if not files:
+        return redirect(url_for("index", msg="batch_upload:0"))
+    aid = accounts.current_account_id()
+    # 批量拖入的默认标签，方便事后在标签云里成组筛出来
+    labels = materials.labels_str(request.form.get("labels", ""))
+    added, skipped = [], []
+    for f in files:
+        fn = os.path.basename((f.filename or "").replace("\\", "/"))
+        if not fn:
+            continue
+        ext = fn.rsplit(".", 1)[-1].lower() if "." in fn else ""
+        if ext not in materials.VIDEO_EXTS:
+            skipped.append(fn)
+            continue
+        dest = os.path.join(materials.media_dir(), fn)
+        # 同名文件已存在时不覆盖——避免把已有素材的文件悄悄换掉
+        if os.path.exists(dest):
+            dest = os.path.join(
+                materials.media_dir(),
+                f"{os.path.splitext(fn)[0][:36]}_{uuid.uuid4().hex[:4]}{ext}",
+            )
+        try:
+            f.save(dest)
+        except Exception as e:
+            skipped.append(fn)
+            print(f"[WARN] 保存失败 {fn}：{str(e)[:80]}")
+            continue
+        title = os.path.splitext(fn)[0]
+        m = materials.add_material(
+            {"title": title, "video_path": dest, "status": "待发布", "labels": labels},
+            account_id=aid,
+        )
+        added.append({"id": m["id"], "title": title})
+    msg = f"batch_upload:{len(added)}:{len(skipped)}"
+    if len(added) == 1:
+        # 只有一条时直接跳到编辑页，省得再手工填文案
+        return redirect(url_for("edit_material", mid=added[0]["id"]))
+    return redirect(url_for("index", msg=msg))
+
+
+@app.route("/library/heal")
+def library_heal():
+    """路径自愈：视频文件被移动/改名后，自动把素材指回新位置。
+
+    分两步：先预览（dry_run）让人确认，再实际修复。
+    """
+    if request.args.get("do") == "1":
+        r = materials.heal_paths(dry_run=False)
+        return redirect(url_for("library_maintain", done=f"heal:{len(r['healed'])}"))
+    r = materials.heal_paths(dry_run=True)
+    return render_template(
+        "library_heal.html",
+        r=r,
+        acc=accounts.current_account(),
+        title="找回被移动的视频",
+    )
 
 
 @app.route("/materials/new", methods=["POST"])

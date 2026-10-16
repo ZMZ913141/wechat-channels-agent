@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}找回被移动的视频{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <h2 style="margin:0">🔍 找回被移动的视频</h2>
+    <a class="btn ghost" style="margin-left:auto" href="/library/maintain">← 返回维护页</a>
+  </div>
+  <p class="muted" style="margin:8px 0 0;font-size:12px">
+    素材记录里存的是<b>文件路径</b>，你把视频挪到别的文件夹后路径就失效了。
+    这里按「文件名 + 文件大小」在素材所在目录（含其子目录）里扫描，
+    自动把它们指回新位置——<b>标题、文案、标签、发布历史全部保留</b>，不会重新建素材。
+  </p>
+</div>
+
+<div class="card">
+  <h3>检查结果</h3>
+  <p class="muted">
+    当前账号 <b>{{ acc.name or acc.id }}</b> 共 {{ r.checked }} 条素材，
+    其中 <b style="color:{{ 'var(--bad)' if r.missing else 'inherit' }}">{{ r.missing }}</b> 条文件路径已失效。
+  </p>
+
+  {% if r.missing == 0 %}
+  <div class="empty">所有素材的文件都在位，无需修复 ✓</div>
+
+  {% elif r.healed %}
+  <h4 style="margin:14px 0 6px">✅ 可自动找回 {{ r.healed|length }} 条</h4>
+  <div class="tablewrap">
+    <table class="tbl">
+      <thead><tr><th>素材</th><th>原路径（已失效）</th><th>新位置（已找到）</th></tr></thead>
+      <tbody>
+      {% for h in r.healed %}
+        <tr>
+          <td class="ellip2" title="{{ h.title }}">{{ h.title or '(无标题)' }}</td>
+          <td class="ellip2 bad" title="{{ h.old }}">{{ h.old }}</td>
+          <td class="ellip2 ok" title="{{ h.new }}">{{ h.new }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:12px">
+    <a class="btn" href="/library/heal?do=1">✓ 确认修复这 {{ r.healed|length }} 条路径</a>
+    <span class="muted" style="margin-left:10px">只改路径指向，素材内容与历史不受影响</span>
+  </p>
+
+  {% else %}
+  <div class="empty">
+    有 {{ r.missing }} 条素材的文件找不到了。<br>
+    可能已被移动到别的磁盘、或被删除。请到
+    <a href="/materials/{{ r.still_missing[0].id }}/edit">该素材的编辑页</a> 手动指定新路径。
+  </div>
+  {% endif %}
+
+  {% if r.still_missing %}
+  <h4 style="margin:16px 0 6px">⚠️ 扫不到、需手动处理 {{ r.still_missing|length }} 条</h4>
+  <div class="tablewrap">
+    <table class="tbl">
+      <thead><tr><th>素材</th><th>原路径</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for s in r.still_missing %}
+        <tr>
+          <td class="ellip2">{{ s.title or '(无标题)' }}</td>
+          <td class="ellip2 bad" title="{{ s.path }}">{{ s.path }}</td>
+          <td class="nw"><a class="btn ghost" href="/materials/{{ s.id }}/edit">去修正路径</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

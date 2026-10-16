@@ -104,8 +104,19 @@ def add_material(data: dict, account_id: str | None = None) -> dict:
         "created_at": now,
         "updated_at": now,
     }
+    _stamp_file_sig(item)
     items.append(item)
     save_materials(items)
+    return item
+
+
+def _stamp_file_sig(item: dict) -> dict:
+    """写入文件指纹（文件存在时）。路径自愈靠它识别"同一个文件被移动"。"""
+    vp = (item.get("video_path") or "").strip()
+    if vp:
+        sig = file_signature(vp)
+        if sig:
+            item["file_sig"] = sig
     return item
 
 
@@ -126,6 +137,12 @@ def update_material(mid: str, data: dict):
                         it[k] = str(data[k]).lower() in ("1", "true", "on", "yes")
                     elif k == "labels":
                         it[k] = labels_str(data[k])
+                    elif k == "video_path":
+                        it[k] = data[k]
+                        # 路径变了要重算指纹，否则自愈会用旧指纹匹配
+                        sig = file_signature(data[k] or "")
+                        if sig:
+                            it["file_sig"] = sig
                     else:
                         it[k] = data[k]
             it["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -211,6 +228,123 @@ def video_exists(material: dict) -> bool | None:
     if not p:
         return None
     return os.path.exists(p)
+
+
+# ===========================================================================
+# 路径自愈：视频文件被移动/改名后自动找回
+# ===========================================================================
+def file_signature(path: str) -> str:
+    """文件指纹：文件名 + 字节大小。
+
+    为什么不用 md5：几百MB 视频算全哈希要几十秒，而找回逻辑可能对上百条
+    素材逐个执行。文件名+大小足够可靠，且成本是 O(1)。
+
+    为什么不直接用绝对路径：用户把视频从「待上传视频」挪到「已发布」文件夹
+    是**极其常见**的整理习惯，路径一变所有历史素材就全废了。
+    """
+    try:
+        ap = os.path.abspath(path)
+        return f"{os.path.basename(ap).lower()}|{os.path.getsize(ap)}"
+    except OSError:
+        return ""
+
+
+def _search_roots() -> list:
+    """要扫描找回的目录。
+
+    覆盖三类位置：
+      1. media/（本工具上传的文件）
+      2. 各素材原路径的父目录（用户只是把文件挪进了子目录）
+      3. 素材原路径的**祖父目录**（用户把整个文件夹挪走了一层，
+         比如「待上传视频/xxx/视频.mp4」→「已发布/视频.mp4」）
+    """
+    roots = []
+    media = media_dir()
+    if media:
+        roots.append(media)
+    try:
+        for it in load_materials():
+            vp = (it.get("video_path") or "").strip()
+            if not vp:
+                continue
+            d = os.path.dirname(os.path.abspath(vp))
+            for cand in (d, os.path.dirname(d)):
+                if cand and os.path.isdir(cand) and cand not in roots:
+                    roots.append(cand)
+    except Exception:
+        pass
+    return roots
+
+
+def find_moved_file(material: dict, max_depth: int = 2) -> str:
+    """素材文件丢失时，在常见位置里按指纹找回它。找不到返回 ""。
+
+    扫描深度默认 2 层：足以覆盖「挪进子文件夹」这种最常见的整理习惯，
+    又不会在超大目录里卡住（每深一层文件数可能指数增长）。
+    """
+    vp = (material.get("video_path") or "").strip()
+    if not vp:
+        return ""
+    sig = (material.get("file_sig") or "").strip()
+    if not sig:
+        # 老数据没有指纹，用「文件名+大小」现算（路径没了算不出来，只能按名字找）
+        base = os.path.basename(vp).lower()
+        if not base:
+            return ""
+    else:
+        base = sig.split("|")[0]
+
+    for root in _search_roots():
+        try:
+            if not os.path.isdir(root):
+                continue
+            for cur, dirs, files in os.walk(root):
+                depth = cur[len(root):].count(os.sep)
+                if depth >= max_depth:
+                    dirs[:] = []      # 不再往下走
+                for fn in files:
+                    if not fn.lower().startswith(base):
+                        continue
+                    fp = os.path.join(cur, fn)
+                    if not sig:
+                        return fp            # 无指纹时按文件名匹配即可
+                    try:
+                        if file_signature(fp) == sig:
+                            return fp
+                    except OSError:
+                        continue
+        except (OSError, PermissionError):
+            continue
+    return ""
+
+
+def heal_paths(dry_run: bool = False, account_id: str | None = None) -> dict:
+    """扫描所有素材，把「文件已移动」的记录自动指回新位置。
+
+    dry_run=True 只报告会找回哪些，不实际改（用于预览）。
+    返回 {"checked": n, "missing": n, "healed": [...], "still_missing": [...]}
+    """
+    healed, still = [], []
+    items = load_materials(account_id)
+    missing = 0
+    for it in items:
+        vp = (it.get("video_path") or "").strip()
+        if not vp or os.path.exists(vp):
+            continue
+        missing += 1
+        newp = find_moved_file(it)
+        if newp:
+            healed.append({"id": it["id"], "title": it.get("title", ""),
+                           "old": vp, "new": newp})
+            if not dry_run:
+                it["video_path"] = newp
+                it["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            still.append({"id": it["id"], "title": it.get("title", ""), "path": vp})
+    if not dry_run and healed:
+        save_materials(items)
+    return {"checked": len(items), "missing": missing, "healed": healed,
+            "still_missing": still}
 
 
 def list_dir_videos(dir_path: str) -> list:

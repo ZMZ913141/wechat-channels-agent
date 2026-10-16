@@ -2,6 +2,7 @@
 {% from "macros/macros.html" import material_card with context %}
 {% block title %}{{ APP_NAME }} · 管理面板{% endblock %}
 {% block content %}
+{% if flash %}{{ flash|safe }}{% endif %}
 <div class="card">
   <div class="accbar">
     <span class="muted">当前账号：</span>
@@ -32,9 +33,12 @@
       </h2>
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:-2px 0 10px">
         {{ library_summary(cur_account_id)|safe }}
-        <a class="btn ghost" style="margin-left:auto" href="/library/maintain"
+        <a class="btn ghost" style="margin-left:auto" href="/library/heal"
+           title="视频被移动/改名后，自动把素材指回新位置（不丢文案与历史）">🔍 找回移动的视频</a>
+        <a class="btn ghost" href="/library/maintain"
            title="查重、清理文件丢失的素材、归档过期已发布素材">🧹 素材库维护</a>
       </div>
+      {% include 'partials/bulk_upload.html' %}
       <div class="searchbar">
         <form method="get" action="/" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <input type="hidden" name="status" value="{{ sf }}">

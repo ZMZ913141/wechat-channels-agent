@@ -271,3 +271,32 @@
   line-height:1.75;white-space:pre-wrap;word-break:break-all;max-height:70vh;overflow:auto;
   color:var(--fg);margin:0}
 .logview:empty::after{content:"（暂无内容）";color:var(--mut)}
+
+/* ===========================================================================
+   批量拖入区 + 卡片操作区修复
+   =========================================================================== */
+.bulkzone{margin-top:10px;padding:22px 14px;text-align:center;cursor:pointer;
+  border-radius:10px;background:var(--elev);border:1px dashed var(--line);
+  color:var(--mut);font-size:13px;transition:border-color .15s, background .15s}
+.bulkzone:hover{border-color:var(--acc);color:var(--fg)}
+.bulkzone.over{border-color:var(--acc);border-style:solid;
+  background:color-mix(in srgb, var(--acc) 10%, var(--elev));color:var(--acc)}
+.bulks{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.bulkchip{display:inline-flex;align-items:center;gap:6px;max-width:280px;
+  padding:3px 9px;border-radius:20px;font-size:12px;
+  background:var(--elev2);border:1px solid var(--line)}
+.bulkchip i{font-style:normal;font-size:10.5px;color:var(--mut);
+  font-family:ui-monospace,Menlo,Consolas,monospace}
+.bulkchip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 卡片操作区：按钮不再重叠。
+   之前 .mini 只定义了 a.mini，button.mini 缺少边框/内边距复位，
+   在窄卡片里会撑破容器导致「标已发/删除」叠在一起。 */
+.mactions{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;align-items:center}
+button.mini,.mactions a.mini{display:inline-flex;align-items:center;
+  margin:0;padding:2px 9px;border-radius:6px;font-size:12px;line-height:1.7;
+  white-space:nowrap;border:1px solid var(--line);background:var(--elev2);
+  color:var(--acc);text-decoration:none;cursor:pointer;max-width:100%}
+button.mini:hover,.mactions a.mini:hover{background:var(--elev);border-color:var(--acc)}
+.mactions a.mini.danger{color:var(--bad);border-color:color-mix(in srgb, var(--bad) 35%, var(--line))}
+.mactions a.mini.danger:hover{background:color-mix(in srgb, var(--bad) 12%, var(--elev))}

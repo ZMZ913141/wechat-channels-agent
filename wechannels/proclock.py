@@ -97,11 +97,46 @@ def read_holder(profile_dir: str) -> dict | None:
     return None
 
 
-def acquire(profile_dir: str, tag: str, wait_s: float = 0.0, poll_s: float = 1.5) -> tuple:
+def account_id_of_profile(profile_dir: str) -> str:
+    """由档案路径反查所属账号 id（用于关联暂停窗口）。查不到返回 ""。"""
+    try:
+        from . import accounts as _acc
+
+        target = os.path.abspath(profile_dir).lower()
+        for a in _acc.load_accounts():
+            try:
+                if os.path.abspath(_acc.profile_path(a)).lower() == target:
+                    return a["id"]
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return ""
+
+
+def acquire(profile_dir: str, tag: str, wait_s: float = 0.0, poll_s: float = 1.5,
+            respect_pause: bool = True) -> tuple:
     """抢档案锁。返回 (True, None) 或 (False, 占用者信息 dict)。
 
-    wait_s > 0 时最多等待这么久（用于「先暂停监控 → 等它把档案放出来」）。
+    wait_s > 0 时最多等待这么久。
+
+    respect_pause：自动流程（发布等）设为 True —— 若该档案所属账号正处于
+    「手动操作暂停窗口」（用户正在扫码登录/打开发表页），**直接拒绝**而不是
+    抢锁。原因：手动操作是用户显式发起的、优先级高于后台自动流程；
+    而且手动窗口可能长达 30 分钟，等下去毫无意义。
+    手动操作自己调acquire 时传 False，否则会被自己的标记挡住。
     """
+    if respect_pause:
+        acc_id = account_id_of_profile(profile_dir)
+        if acc_id:
+            p = paused(acc_id)
+            if p:
+                left = max(0, int(float(p.get("until", 0)) - time.time()))
+                return False, {
+                    "pid": 0,
+                    "tag": f"手动操作中（{p.get('reason', '被打开发表页')}，剩约 {left // 60} 分钟）",
+                }
+
     deadline = time.time() + max(0.0, float(wait_s))
     while True:
         holder = read_holder(profile_dir)

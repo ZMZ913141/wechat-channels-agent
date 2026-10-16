@@ -7,7 +7,7 @@
 <div class="card">
   <div class="pubgrid">
     <div class="preview">
-      <div class="pv-thumb" id="pv_thumb">{% if m %}{% if m and m.cover_path %}<img src="/media/{{ m.cover_path }}" alt="">{% else %}<video src="/media/{{ m.video_path }}" muted preload="metadata"></video>{% endif %}{% endif %}</div>
+      <div class="pv-thumb" id="pv_thumb">{% if m %}{% if m and m.cover_path %}<img src="{{ media_url(m.cover_path) }}" alt="">{% else %}<video src="{{ media_url(m.video_path) }}" muted preload="metadata"></video>{% endif %}{% endif %}</div>
       <div class="pv-body">
         <div class="pv-title" id="pv_title">{{ (m.short_title or m.title) if m else "（未选择素材）" }}</div>
         <div class="pv-desc" id="pv_desc">{% if m %}{{ copy_text(m) }}{% else %}（暂无文案）{% endif %}</div>

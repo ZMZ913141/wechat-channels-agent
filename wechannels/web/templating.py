@@ -35,18 +35,37 @@ def copy_text(m: dict) -> str:
     return (materials.copy_text(m) or "").replace('"', "&quot;")
 
 
+def media_url(path: str) -> str:
+    """本地绝对路径 → /media URL。
+
+    必须做 URL 编码：素材常存放在中文路径与带空格的目录下
+    （如 D:\\QMR\\Pictures\\珠珠资产\\...），不编码浏览器会取不到 → 显示「无预览」。
+    盘符冒号也要转，否则会被当成协议分隔符。
+    """
+    import urllib.parse
+
+    if not path:
+        return ""
+    p = str(path).replace("\\", "/")
+    return "/media/" + urllib.parse.quote(p.lstrip("/"), safe="/:")
+
+
 def thumb(m: dict) -> str:
-    """缩略图 HTML：优先自定义封面，其次取视频首帧，都没有则显示占位。"""
+    """卡片缩略图。
+
+    视频**不能**用 `<img>` 显示（浏览器不支持），必须用 `<video preload="metadata">`
+    —— 浏览器会自动渲染第一帧，看起来就是封面图，且不需要 ffmpeg 抽帧。
+    这也是老代码显示「无预览」的根因之一。
+    """
     cover = (m.get("cover_path") or "").strip()
     video = (m.get("video_path") or "").strip()
-    url = None
     if cover and os.path.exists(cover):
-        url = "/media/" + cover.replace("\\", "/").lstrip("/")
-    elif video and os.path.exists(video):
-        url = "/media/" + video.replace("\\", "/").lstrip("/")
-    if url:
-        return (f'<img src="{url}" alt="" loading="lazy" '
-                f'onerror="this.parentNode.classList.add(\'noimg\');this.remove()">')
+        return f'<img src="{media_url(cover)}" alt="" loading="lazy">'
+    if video and os.path.exists(video):
+        return (
+            f'<video src="{media_url(video)}" preload="metadata" muted playsinline '
+            f'#t=1" onerror="this.parentNode.classList.add(\'noimg\')"></video>'
+        )
     return '<div class="nothumb">无预览</div>'
 
 
@@ -151,5 +170,6 @@ app.jinja_env.globals.update(
     library_summary=library_summary,
     accounts_channel=accounts_channel,
     login_badge=login_badge,
+    media_url=media_url,
 )
 app.jinja_env.filters["dt_local"] = dt_local

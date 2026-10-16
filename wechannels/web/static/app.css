@@ -170,3 +170,53 @@
 /* 批量操作条 */
 .batchbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:9px 11px;
   margin:10px 0;background:var(--elev);border:1px solid var(--line);border-radius:8px}
+
+/* ===========================================================================
+   数据看板
+   =========================================================================== */
+.kpirow{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px}
+.kpi.ok{border-color:rgba(34,197,94,.4)}
+.kpi.bad{border-color:rgba(239,68,68,.4)}
+.kpi .kl{color:var(--mut);font-size:12px;margin-bottom:3px}
+.kpi .kv{font-size:26px;font-weight:700;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.15}
+.kpi.ok .kv{color:var(--ok)}
+.kpi.bad .kv{color:var(--bad)}
+.kpi .kh{color:var(--mut);font-size:10.5px;margin-top:5px;opacity:.85}
+
+/* 账号维度卡片：左边框=账号色 */
+.acctstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.astat{background:var(--elev);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+.ahead{display:flex;align-items:center;gap:7px;margin-bottom:9px}
+.adot{display:inline-block;width:10px;height:10px;border-radius:3px;flex:0 0 auto}
+.aname{font-weight:600;font-size:13.5px;color:var(--fg);text-decoration:none}
+.aname:hover{text-decoration:underline}
+.ametrics{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center}
+.ametrics div{display:flex;flex-direction:column;gap:1px}
+.ametrics b{font-size:15px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.ametrics span{font-size:10px;color:var(--mut)}
+.ametrics .ok b{color:var(--ok)}
+.ametrics .warn b{color:var(--warn)}
+.ametrics .bad b{color:var(--bad)}
+.anote{margin-top:8px;padding-top:7px;border-top:1px solid var(--line);
+  font-size:10.5px;color:var(--mut)}
+.anote.ok{color:var(--ok)}
+.anote.bad{color:var(--bad)}
+
+/* 图表 */
+.chartgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:14px;margin-bottom:14px}
+@media (max-width:860px){.chartgrid{grid-template-columns:1fr}}
+.chart{height:260px;width:100%}
+
+/* 明细表 */
+.tablewrap{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.tbl td{font-size:12.5px}
+.tbl td.nw{white-space:nowrap}
+.tbl td.ellip2{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbl td.err{color:var(--bad);font-size:11.5px}
+.tbl thead th{position:sticky;top:0;background:var(--elev2);z-index:1}
+.pill{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;
+  background:var(--elev2);color:var(--mut);white-space:nowrap}
+.pill.ok{background:rgba(34,197,94,.16);color:var(--ok)}
+.pill.bad{background:rgba(239,68,68,.16);color:var(--bad)}
+.pill.warn{background:rgba(245,158,11,.16);color:var(--warn)}

@@ -53,7 +53,7 @@
         <label>视频文件（可上传/拖拽，或填本地路径）</label>
         <div class="drop" id="vdrop">点击选择 或 拖拽视频文件到这里</div>
         <input type="file" name="video_file" id="vfile" accept="video/*,image/*" style="display:none">
-        <div class="thumbs" id="vprev">{% if m.video_path %}<video src="/media/{{ m.video_path }}" muted preload="metadata"></video>{% endif %}</div>
+        <div class="thumbs" id="vprev">{% if m.video_path %}<video src="{{ media_url(m.video_path) }}" muted preload="metadata"></video>{% endif %}</div>
         <input name="video_path" id="f_vpath" value="{{ m.video_path or "" }}" placeholder="或填本地路径 d:/videos/demo.mp4"
                oninput="syncName(this.value)">
       </div>
@@ -61,7 +61,7 @@
         <label>封面图（可上传/拖拽，或填本地路径）</label>
         <div class="drop" id="cdrop">点击选择 或 拖拽图片到这里</div>
         <input type="file" name="cover_file" id="cfile" accept="image/*" style="display:none">
-        <div class="thumbs" id="cprev">{% if m.cover_path %}<img src="/media/{{ m.cover_path }}" alt="">{% endif %}</div>
+        <div class="thumbs" id="cprev">{% if m.cover_path %}<img src="{{ media_url(m.cover_path) }}" alt="">{% endif %}</div>
         <input name="cover_path" id="f_cpath" value="{{ m.cover_path or "" }}" placeholder="或填本地路径 d:/videos/cover.jpg">
       </div>
     </div>

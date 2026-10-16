@@ -21,8 +21,24 @@ from wechannels.web import views_core  # noqa: E402,F401
 from wechannels.web import views_library  # noqa: E402,F401
 from wechannels.web import views_accounts  # noqa: E402,F401
 from wechannels.web import views_publish  # noqa: E402,F401
+from wechannels.web import views_dashboard  # noqa: E402,F401
 
 app = base.app
+
+
+def _migrate_legacy_once():
+    """把旧 publish_history 一次性迁到 ledger，让看板能看到历史记录。
+
+    幂等，失败不影响面板启动（历史数据缺失不该阻止使用）。
+    """
+    try:
+        from wechannels.migrate import migrate_legacy
+
+        r = migrate_legacy()
+        if r["batches_created"]:
+            print(f"· 已迁移历史发布记录 {r['records']} 条（共 {r['batches_created']} 批次）→ 数据看板")
+    except Exception as e:
+        print(f"[WARN] 历史数据迁移失败（不影响使用）：{str(e)[:80]}")
 
 
 def main():
@@ -42,6 +58,8 @@ def main():
         print("=" * 60)
 
     from wechannels import accounts, config
+
+    _migrate_legacy_once()
 
     accs = accounts.load_accounts()
     print(f"· 账号数：{len(accs)}  当前：{accounts.current_account_id()}")

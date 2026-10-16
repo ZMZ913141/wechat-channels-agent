@@ -22,7 +22,7 @@ import time
 
 from browser_use import Agent
 
-from . import accounts, config, materials, proclock
+from . import accounts, config, ledger, materials, proclock
 from .browser import get_browser, get_llm
 
 # 账号级任务锁等待时长（秒）。同账号并发发布时，后到者最多等这么久；
@@ -200,7 +200,14 @@ def start_publish_job(material_id: str, account_ids: list, overrides: dict | Non
     with _job_lock:
         _write_job(job)
 
-    t = threading.Thread(target=_run_job, args=(mat, accs, ov), daemon=True)
+    # 建 batch（数据看板的数据源）：一次发布动作 = 一个 batch，
+    # 其中每个账号一个 target。batch_id 会被写进 job 供前端轮询时关联。
+    batch = ledger.new_batch(mat, [a["id"] for a in accs], ov)
+    job["batch_id"] = batch["batch_id"]
+    with _job_lock:
+        _write_job(job)
+
+    t = threading.Thread(target=_run_job, args=(mat, accs, ov, batch["batch_id"]), daemon=True)
     t.start()
     return job
 
@@ -210,10 +217,15 @@ def read_job() -> dict | None:
         return _read_job()
 
 
-def _run_job(mat: dict, accs: list, overrides: dict | None = None) -> None:
+def _run_job(mat: dict, accs: list, overrides: dict | None = None,
+             batch_id: str = "") -> None:
     results = []
     for acc in accs:
         _update_account_status(acc["id"], "发布中…", "")
+        # ---- 写入 ledger（数据看板的数据源）----
+        if batch_id:
+            ledger.start_target(batch_id, acc["id"], acc.get("name", ""))
+        t0 = time.time()
         try:
             ok, text = publish_one_account(acc, mat, overrides=overrides)
             status = "✅ 成功" if ok else "❌ 失败"
@@ -221,12 +233,32 @@ def _run_job(mat: dict, accs: list, overrides: dict | None = None) -> None:
             _update_account_status(acc["id"], status, text)
         except Exception as e:
             results.append((acc, False, str(e)))
+            text = str(e)
             _update_account_status(acc["id"], "❌ 失败", str(e))
-        # 每号结束都写入素材发布历史（状态记录可追溯）
+
+        dur_ms = int((time.time() - t0) * 1000)
+        if batch_id:
+            ok_last = results[-1][1]
+            # 三态而非布尔：「已点击发表但未确认」不等于失败，也不该触发重试
+            if ok_last:
+                st, code, stage = "success", "", ""
+            elif "未检测到成功信号" in text:
+                st, code, stage = "unverified", "", "confirm"
+            else:
+                st = "failed"
+                code, stage = ledger.classify_error(text)
+            ledger.finish_target(batch_id, acc["id"], st, ok_text=text,
+                                 error_code=code, error_stage=stage,
+                                 duration_ms=dur_ms)
+
+        # 每号结束都写入素材发布历史（状态记录可追溯，素材页要显示）
         ok_last = results[-1][1]
         materials.record_publish(mat["id"], acc, ok_last, results[-1][2])
 
-    # 汇总通知 + 更新素材状态
+    if batch_id:
+        ledger.close_batch(batch_id)
+
+    # 汇总结果 + 更新素材状态
     ok_count = sum(1 for _, ok, _ in results if ok)
     job = _read_job() or {}
     cfg = job.get("config", {})

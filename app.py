@@ -155,6 +155,18 @@ TEMPLATE = """<!doctype html>
   .filelist .meta{color:var(--mut);font-size:11px;margin-left:auto}
   .check-mat{position:absolute;top:8px;left:8px;z-index:2;transform:scale(1.3);cursor:pointer}
   .mcard{position:relative}
+  /* 分类标签 chip：与话题 tag(#xxx) 视觉上明确区分 —— 实心可点击=管理，空心灰=话题 */
+  .labelbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 12px;padding:8px 10px;
+            background:var(--elev);border:1px solid var(--line);border-radius:8px}
+  .lchip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;
+         font-size:12px;text-decoration:none;color:var(--acc);background:rgba(59,130,246,.12);
+         border:1px solid rgba(59,130,246,.35);cursor:pointer}
+  .lchip:hover{background:rgba(59,130,246,.24)}
+  .lchip.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+  .lchip .cn{font-size:10px;opacity:.7;font-family:ui-monospace,monospace}
+  .mlabels{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0 2px}
+  .mlabels:empty{display:none}
+  .mtags:empty{display:none}
 </style></head>
 <body>
 <header>
@@ -190,8 +202,14 @@ TEMPLATE = """<!doctype html>
           <a class="{f_待发布}" href="/?status=待发布">待发布</a>
           <a class="{f_草稿}" href="/?status=草稿">草稿</a>
           <a class="{f_已发布}" href="/?status=已发布">已发布</a>
+          <a class="{f_已归档}" href="/?status=已归档">已归档</a>
         </span>
       </h2>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:-2px 0 10px">
+        {lib_summary}
+        <a class="btn ghost" style="margin-left:auto" href="/library/maintain"
+           title="查重、清理文件丢失的素材、归档过期已发布素材">🧹 素材库维护</a>
+      </div>
       <div class="searchbar">
         <form method="get" action="/" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <input type="hidden" name="status" value="{sf}">
@@ -210,7 +228,13 @@ TEMPLATE = """<!doctype html>
         <button class="btn ghost" type="submit" name="op" value="mark_已发布" onclick="return setOp('mark_已发布')">标为已发布</button>
         <button class="btn ghost" type="submit" name="op" value="mark_待发布" onclick="return setOp('mark_待发布')">标为待发布</button>
         <button class="btn ghost" type="submit" name="op" value="mark_草稿" onclick="return setOp('mark_草稿')">标为草稿</button>
-        <button class="btn danger" type="submit" name="op" value="delete" onclick="return confirm('确认批量删除所选素材？')">批量删除</button>
+        <button class="btn ghost" type="submit" name="op" value="mark_已归档" onclick="return setOp('mark_已归档')">归档</button>
+        <span class="muted" style="margin-left:6px">标签</span>
+        <input name="labels" list="dl_labels" placeholder="逗号分隔"
+               style="width:150px;padding:4px 8px;background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:6px;font-size:12px">
+        <button class="btn ghost" type="submit" name="op" value="label_add" onclick="return setOp('label_add')" title="给所选素材追加标签">打标签</button>
+        <button class="btn ghost" type="submit" name="op" value="label_remove" onclick="return setOp('label_remove')" title="移除所选标签">移除</button>
+        <button class="btn danger" type="submit" name="op" value="delete" onclick="return confirm('确认批量删除所选素材？（只删记录，视频文件不动）')">批量删除</button>
         <a class="mini" href="javascript:void(0)" onclick="toggleSelect(true)">全选</a>
         <a class="mini" href="javascript:void(0)" onclick="toggleSelect(false)">取消全选</a>
       </div>
@@ -398,6 +422,9 @@ NEW_FORM = """<form method="post" action="/materials/new" enctype="multipart/for
   <label>话题标签（逗号分隔，自动加 #，建议 5-8 个）
     <button class="genbtn" type="button" onclick="genField('tags')">✨ 生成</button></label>
   <input name="tags" id="f_tags" placeholder="干货,教程">
+  <label>分类标签 <span class="muted">（逗号分隔，仅用于自己检索管理，不会发布出去）</span></label>
+  <input name="labels" id="f_labels" placeholder="待剪辑,爆款,双十一" list="dl_labels">
+  <datalist id="dl_labels">{label_options}</datalist>
   <div class="grid2">
     <div><label>视频标注 <span class="muted">（AI 内容依法须声明）</span>
         <button class="genbtn" type="button" onclick="genField('ai_declare')">✨ 生成</button></label>
@@ -441,6 +468,7 @@ CARD = """<div class="mcard {statuscls}">
   <div class="thumb">{thumb}</div>
   <div class="mbody">
     <div class="mtitle" title="{title}">{title}</div>
+    <div class="mlabels">{labels_html}</div>
     <div class="mtags">{tags}</div>
     <div class="mbadge"><span class="st {status}">{status}</span>{badges}</div>
     {history}
@@ -450,7 +478,7 @@ CARD = """<div class="mcard {statuscls}">
       <a class="mini" href="/publish?material={id}">发布</a>
       <a class="mini" href="/materials/{id}/clone">复用</a>
       <a class="mini" href="/materials/{id}/status?status=已发布">标已发</a>
-      <a class="mini danger" href="/materials/{id}/delete" onclick="return confirm('删除此素材？')">删除</a>
+      <a class="mini danger" href="/materials/{id}/delete" onclick="return confirm('删除此素材？（只删记录，不动你的视频文件）')">删除</a>
     </div>
     <div class="mpath muted">{path}</div>
   </div>
@@ -534,6 +562,13 @@ EDIT_TPL = """<!doctype html><html lang="zh-CN" data-theme="dark"><head><meta ch
     <label>话题标签（逗号分隔，自动加 #）
       <button class="genbtn" type="button" onclick="genField('tags')">✨ AI填写</button></label>
     <input name="tags" id="f_tags" value="{tags}">
+  </div>
+
+  <div class="card">
+    <label>分类标签 <span class="muted">（逗号分隔，仅用于自己检索管理，<b>不会</b>发布出去）</span></label>
+    <input name="labels" id="f_labels" value="{labels}" placeholder="待剪辑,爆款,双十一" list="dl_labels_e">
+    <datalist id="dl_labels_e">{label_options}</datalist>
+    <div class="mtags" style="margin-top:8px">{cur_labels}</div>
   </div>
 
   <div class="card">
@@ -1067,22 +1102,43 @@ def _material_history_html(m: dict) -> str:
     return "".join(lines) + more
 
 
-def _material_card_html(m: dict) -> str:
+def _label_chips(labels: list, label_filter: str = "") -> str:
+    """把分类标签渲染成可点击的筛选 chip。
+
+    与话题 tags 视觉上明确区分：标签是实心可点的管理元素，话题是灰色的 # 文本。
+    """
+    if not labels:
+        return ""
+    out = []
+    for t in labels:
+        on = " on" if (label_filter and t.lower() == label_filter.lower()) else ""
+        out.append(
+            f'<a class="lchip{on}" href="/?label={quote(t)}" '
+            f'title="按「{t}」筛选">{html.escape(t)}</a>'
+        )
+    return "".join(out)
+
+
+def _material_card_html(m: dict, label_filter: str = "") -> str:
     mid = m["id"]
     status = m.get("status", "待发布")
-    scls = {"待发布": "warn", "已发布": "ok", "草稿": "acc", "发布中": "acc", "失败": "bad"}.get(status, "acc")
+    scls = {"待发布": "warn", "已发布": "ok", "草稿": "acc", "发布中": "acc",
+            "失败": "bad", "已归档": "acc"}.get(status, "acc")
     cover = (m.get("cover_path") or "").strip()
     video = (m.get("video_path") or "").strip()
     thumb = _thumb_html(cover, video)
+    # 话题（观众可见，发布时进描述）
     tags = "".join(
         f'<span class="tag">#{t.strip()}</span>' for t in (m.get("tags") or "").split(",") if t.strip()
     )
+    # 分类标签（内部管理用）
+    labels_html = _label_chips(materials.get_labels(m), label_filter)
     pathtxt = video or cover or "（未设置文件）"
     copy = (materials.copy_text(m) or "").replace('"', "&quot;")
     return CARD.format(
         status=status, statuscls=scls, thumb=thumb,
         title=(m.get("title") or "(无标题)").replace('"', "&quot;"),
-        tags=tags, copy=copy, id=mid, path=pathtxt,
+        tags=tags, labels_html=labels_html, copy=copy, id=mid, path=pathtxt,
         badges=_material_badges(m), history=_material_history_html(m),
     )
 
@@ -1091,15 +1147,54 @@ def _match_material(m: dict, q: str) -> bool:
     q = (q or "").strip().lower()
     if not q:
         return True
-    hay = " ".join([m.get("title", ""), m.get("short_title", ""), m.get("desc", ""), m.get("tags", "")])
+    hay = " ".join([
+        m.get("title", ""), m.get("short_title", ""), m.get("desc", ""),
+        m.get("tags", ""), m.get("labels", ""),
+    ])
     return q in hay.lower()
 
 
-def _materials_grid(status_filter: str | None, q: str = "", sort: str = "new") -> str:
+def _label_cloud(account_id: str, current: str = "") -> str:
+    """标签云：点击即筛选，再次点击同一标签取消筛选。"""
+    pairs = materials.all_labels(account_id)
+    if not pairs:
+        return ""
+    out = ['<div class="labelbar"><span class="muted" style="font-size:12px">分类标签</span>']
+    if current:
+        out.append('<a class="lchip on" href="/?">✕ 清除筛选</a>')
+    for name, cnt in pairs[:24]:
+        on = " on" if (current and name.lower() == current.lower()) else ""
+        out.append(
+            f'<a class="lchip{on}" href="/?label={quote(name)}">{html.escape(name)}'
+            f'<span class="cn">{cnt}</span></a>'
+        )
+    out.append("</div>")
+    return "".join(out)
+
+
+def _library_summary(account_id: str) -> str:
+    """素材库概览条：条数 / 体积 / 丢失文件。"""
+    s = materials.library_stats(account_id)
+    bits = [f"共 <b>{s['total']}</b> 条"]
+    if s["total_mb"]:
+        bits.append(f"视频合计 <b>{s['total_mb']}</b> MB")
+    if s["labels"]:
+        bits.append(f"{s['labels']} 个标签")
+    if s["missing_files"]:
+        bits.append(
+            f'<span style="color:var(--bad)">{s["missing_files"]} 条文件丢失</span>'
+        )
+    return '<span class="muted" style="font-size:12px">' + " · ".join(bits) + "</span>"
+
+
+def _materials_grid(status_filter: str | None, q: str = "", sort: str = "new",
+                    label_filter: str = "") -> str:
     acc_id = accounts.current_account_id()
     items = materials.load_materials(acc_id)
     if status_filter:
         items = [it for it in items if it.get("status") == status_filter]
+    if label_filter:
+        items = materials.filter_by_label(items, label_filter)
     if q:
         items = [it for it in items if _match_material(it, q)]
     if sort == "updated":
@@ -1109,10 +1204,17 @@ def _materials_grid(status_filter: str | None, q: str = "", sort: str = "new") -
         items.sort(key=lambda m: order.get(m.get("status", ""), 99))
     else:
         items.reverse()  # 最新创建在前（load 顺序即创建顺序）
+
+    cloud = _label_cloud(acc_id, label_filter)
     if not items:
-        hint = "没有匹配的素材。" if (q or status_filter) else "还没有素材，先在上面新建一条（或用「目录导入」批量导入）。"
-        return f'<p class="muted">{hint}</p>'
-    return '<div class="grid-mat">' + "".join(_material_card_html(m) for m in items) + "</div>"
+        cond = "（当前筛选条件下）" if (q or status_filter or label_filter) else ""
+        hint = f"没有匹配的素材{cond}。" if (q or status_filter or label_filter) \
+            else "还没有素材，先在上面新建一条（或用「目录导入」批量导入）。"
+        return cloud + f'<p class="muted">{hint}</p>'
+    grid = '<div class="grid-mat">' + "".join(
+        _material_card_html(m, label_filter) for m in items
+    ) + "</div>"
+    return cloud + grid
 
 
 def _spawn_open_publish(account_id: str, login: bool = False) -> None:
@@ -1141,6 +1243,7 @@ def index():
     sf = request.args.get("status")
     q = request.args.get("q", "")
     sort = request.args.get("sort", "new")
+    label = request.args.get("label", "")
     html = TEMPLATE
     html = html.replace("{account_options}", _account_options())
     html = html.replace("{account_count}", str(len(accounts.load_accounts())))
@@ -1148,19 +1251,33 @@ def index():
     _cur_acc_name = (_cur_acc.get("name") or _cur_acc["id"]).replace("<", "&lt;").replace(">", "&gt;")
     html = html.replace("{cur_account_id}", _cur_acc["id"])
     html = html.replace("{cur_account_name}", _cur_acc_name)
-    html = html.replace("{count}", str(len(materials.load_materials(accounts.current_account_id()))))
-    html = html.replace("{materials_grid}", _materials_grid(sf, q, sort))
-    html = html.replace("{new_material_form}", NEW_FORM)
+    acc_id = accounts.current_account_id()
+    html = html.replace("{count}", str(len(materials.load_materials(acc_id))))
+    html = html.replace("{lib_summary}", _library_summary(acc_id))
+    html = html.replace("{label_options}", _label_options_html(acc_id))
+    html = html.replace("{materials_grid}", _materials_grid(sf, q, sort, label))
+    html = html.replace("{new_material_form}", NEW_FORM.format(
+        label_options=_label_options_html(acc_id)))
     html = html.replace("{q}", q)
     html = html.replace("{sf}", sf or "")
+    html = html.replace("{label_hl}", f'按「{html.escape(label)}」筛选中' if label else "")
     html = html.replace("{s_new}", "selected" if sort == "new" else "")
     html = html.replace("{s_updated}", "selected" if sort == "updated" else "")
     html = html.replace("{s_status}", "selected" if sort == "status" else "")
-    html = html.replace("{f_all}", "on" if not sf else "")
+    html = html.replace("{f_all}", "on" if (not sf and not label) else "")
     html = html.replace("{f_待发布}", "on" if sf == "待发布" else "")
     html = html.replace("{f_草稿}", "on" if sf == "草稿" else "")
     html = html.replace("{f_已发布}", "on" if sf == "已发布" else "")
+    html = html.replace("{f_已归档}", "on" if sf == "已归档" else "")
     return html
+
+
+def _label_options_html(account_id: str) -> str:
+    """datalist：输入分类标签时给出已有标签补全，降低手输出错。"""
+    out = []
+    for name, _cnt in materials.all_labels(account_id):
+        out.append(f'<option value="{html.escape(name)}">')
+    return "".join(out)
 
 
 @app.route("/switch_account", methods=["POST"])
@@ -1260,6 +1377,11 @@ def edit_material(mid):
     html = EDIT_TPL
     for k in ("id", "title", "short_title", "desc", "tags", "video_path", "cover_path", "ext_link"):
         html = html.replace("{" + k + "}", (m.get(k) or "").replace('"', "&quot;"))
+    # 分类标签：输入框回填 + 已打标签的 chip 展示
+    _cur_labs = materials.get_labels(m)
+    html = html.replace("{labels}", ",".join(_cur_labs))
+    html = html.replace("{cur_labels}", _label_chips(_cur_labs))
+    html = html.replace("{label_options}", _label_options_html(m.get("account_id", "")))
     sched = (m.get("scheduled_at") or "").replace(" ", "T")[:16]
     html = html.replace("{scheduled_at}", sched)
     html = html.replace("{ai_opts}", ai_opts)
@@ -1309,7 +1431,213 @@ def materials_batch():
         st = op[len("mark_"):]
         if st in materials.STATUSES:
             materials.set_status_many(mids, st)
+    elif op in ("label_add", "label_replace", "label_remove"):
+        # 批量打/改/移分类标签
+        raw = request.form.get("labels", "")
+        mode = {"label_add": "add", "label_replace": "replace", "label_remove": "remove"}[op]
+        n = materials.set_labels_many(mids, raw, mode=mode)
+        return redirect(url_for("index", msg=f"label:{mode}:{n}"))
     return redirect(url_for("index"))
+
+
+# ---------------------------------------------------------------------------
+# 素材库维护：查重 / 清理孤儿 / 归档过期
+# ---------------------------------------------------------------------------
+MAINTAIN_TPL = """<!doctype html><html lang="zh-CN" data-theme="dark"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>素材库维护</title>
+<script>
+  (function(){{try{{var t=localStorage.getItem('theme')||'dark';document.documentElement.setAttribute('data-theme',t);}}catch(e){{}}}})();
+</script>
+<style>
+  :root{{--bg:#0f1115;--card:#181b22;--line:#262b36;--fg:#e6e9ef;--mut:#9aa3b2;
+    --acc:#3b82f6;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--elev:#1f232b;--elev2:#262b34;}}
+  [data-theme="light"]{{--bg:#f4f6f9;--card:#ffffff;--line:#dee2e6;--fg:#1f2933;--mut:#5b6675;
+    --acc:#2563eb;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--elev:#f8fafc;--elev2:#eef2f7;}}
+  *{{box-sizing:border-box}}
+  body{{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 system-ui,"Microsoft YaHei",sans-serif}}
+  .wrap{{max-width:1080px;margin:0 auto;padding:22px clamp(14px,3vw,32px) 60px}}
+  header{{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px}}
+  h2{{font-size:17px;margin:0}}
+  h3{{font-size:14px;margin:0 0 8px}}
+  a{{color:var(--acc);text-decoration:none}}
+  label{{display:block;margin:10px 0 4px;color:var(--mut);font-size:12px}}
+  input{{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px;font:inherit}}
+  .card{{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}}
+  .btn{{display:inline-block;padding:8px 14px;background:var(--acc);color:#fff;border-radius:8px;text-decoration:none;border:none;cursor:pointer;font-size:13px}}
+  .btn.ghost{{background:var(--elev2);color:var(--fg);border:1px solid var(--line)}}
+  .btn.danger{{background:var(--bad)}}
+  .theme-btn{{border:1px solid var(--line);background:var(--elev);color:var(--fg);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:13px}}
+  .muted{{color:var(--mut);font-size:12px}}
+  .empty{{padding:22px;text-align:center;color:var(--mut);border:1px dashed var(--line);border-radius:10px}}
+  .row{{display:flex;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}}
+  .row:last-child{{border-bottom:none}}
+  .grow{{flex:1;min-width:0}}
+  .ellip{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+  .st{{font-size:11px;padding:1px 7px;border-radius:20px;background:var(--elev2);color:var(--mut);white-space:nowrap}}
+  .warn{{color:var(--warn)}}.bad{{color:var(--bad)}}.ok{{color:var(--ok)}}
+  .msg{{padding:10px 12px;border-radius:8px;margin:12px 0;font-size:13px;background:rgba(34,197,94,.12);color:var(--ok)}}
+  .grp{{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--elev)}}
+</style></head><body>
+<div class="wrap">
+<header>
+  <h2>🧹 素材库维护</h2>
+  <div><a class="btn ghost" href="/">← 返回面板</a>
+  <button class="theme-btn" onclick="toggleTheme()">🌙 夜视</button></div>
+</header>
+<p class="muted">当前账号：<b>{acc_name}</b> · 共 {total} 条素材。所有清理操作都<b>只删素材记录，绝不删除你的原始视频文件</b>。</p>
+{msg}
+
+<div class="card">
+  <h3>🔍 重复素材（{n_dup} 组）</h3>
+  <p class="muted">按「文件名 + 文件大小」判断。同一视频被反复导入会在这里列出——保留一条即可，其余删掉记录。</p>
+  {dup_body}
+</div>
+
+<div class="card">
+  <h3>⚠️ 文件丢失的素材（{n_orphan} 条）</h3>
+  <p class="muted">这些记录的视频文件已不在磁盘上，<b>无法发布</b>。确认不需要了再清理。</p>
+  {orphan_body}
+</div>
+
+<div class="card">
+  <h3>📦 归档候选：已发布且超过 {days} 天（{n_stale} 条）</h3>
+  <p class="muted">标记为「已归档」后可从常用视图里筛掉，<b>不会删除任何东西</b>，随时能改回来。</p>
+  <form method="post" action="/library/archive">
+    <input type="hidden" name="days" value="{days}">
+    <p><button class="btn ghost" type="submit" onclick="return confirm('把这 {n_stale} 条标记为已归档？')">
+      全部标记为已归档</button></p>
+  </form>
+  {stale_body}
+</div>
+</div>
+<script>
+function toggleTheme(){{
+  var cur=document.documentElement.getAttribute('data-theme');
+  var nx=cur==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',nx);
+  try{{localStorage.setItem('theme',nx);}}catch(e){{}}
+}}
+</script></body></html>"""
+
+
+def _mt_page(tpl: str, **kw) -> str:
+    """渲染独立小页（复用统一主题变量）。"""
+    return tpl.format(**kw)
+
+
+@app.route("/library/maintain")
+def library_maintain():
+    acc = accounts.current_account()
+    aid = acc["id"]
+    days = max(7, int(request.args.get("days", "90")))
+    msg = ""
+    done = request.args.get("done", "")
+    if done:
+        parts = done.split(":")
+        label_map = {"dup": "已删除重复素材", "orphan": "已清理丢失文件���素材",
+                     "archive": "已标记归档"}
+        msg = f'<div class="msg">✓ {label_map.get(parts[0], "操作完成")}：{parts[-1]} 条</div>'
+
+    dups = materials.find_duplicates(aid)
+    orphans = materials.find_orphans(aid)
+    stales = materials.archive_stale_materials(days, aid)
+
+    dup_html = []
+    for g in dups:
+        first_id = g["items"][0]["id"]
+        del_ids = [it["id"] for it in g["items"][1:]]
+        rows = "".join(
+            f'<div class="row"><span class="st">{html.escape(str(it["status"]))}</span>'
+            f'<div class="grow ellip" title="{html.escape(str(it["video_path"]))}">'
+            f'{html.escape(str(it["title"]) or "(无标题)")}</div>'
+            f'<span class="muted">{html.escape(str(it["updated_at"])[:16])}</span></div>'
+            for it in g["items"]
+        )
+        hidden = "".join(f'<input type="hidden" name="mids" value="{i}">' for i in del_ids)
+        keep = f'<input type="hidden" name="keep" value="{first_id}">'
+        dup_html.append(
+            f'<form method="post" action="/library/dedup" class="grp">'
+            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
+            f'<b class="ellip">{html.escape(g["name"])}</b>'
+            f'<span class="muted">{len(g["items"])} 条重复</span></div>'
+            f'{rows}{hidden}{keep}'
+            f'<button class="btn danger" style="margin-top:8px;padding:5px 12px;font-size:12px" '
+            f'type="submit">删除冗余 {len(del_ids)} 条（保留第一条）</button>'
+            f'</form>'
+        )
+
+    dup_body = "".join(dup_html) or '<div class="empty">没有发现重复素材 ✓</div>'
+
+    orphan_body = ""
+    if orphans:
+        rows = "".join(
+            f'<div class="row"><span class="st bad">{html.escape(o.get("reason", ""))}</span>'
+            f'<div class="grow ellip" title="{html.escape(str(o.get("video_path", "")))}">'
+            f'{html.escape(str(o.get("title") or "(无标题)"))}</div></div>'
+            for o in orphans
+        )
+        forms = "".join(f'<input type="hidden" name="mids" value="{o["id"]}">' for o in orphans)
+        orphan_body = (
+            f'<form method="post" action="/library/orphans" class="grp">{rows}{forms}'
+            f'<button class="btn danger" style="margin-top:8px;padding:5px 12px;font-size:12px" type="submit">'
+            f'清理这 {len(orphans)} 条记录（只删记录，视频文件不动）</button>'
+            f'</form>'
+        )
+    else:
+        orphan_body = '<div class="empty">没有丢失文件的素材 ✓</div>'
+
+    stale_body = ""
+    if stales:
+        rows = "".join(
+            f'<div class="row"><span class="st">已发布</span>'
+            f'<div class="grow ellip">{html.escape(str(s.get("title") or "(无标题)"))}</div>'
+            f'<span class="muted">更新于 {html.escape(str(s.get("updated_at", ""))[:10])}</span></div>'
+            for s in stales
+        )
+        stale_body = f'<div class="grp">{rows}</div>'
+    else:
+        stale_body = '<div class="empty">没有需要归档的旧素材 ✓</div>'
+
+    return MAINTAIN_TPL.format(
+        acc_name=html.escape(str(acc.get("name") or acc["id"])),
+        total=len(materials.load_materials(aid)),
+        days=days,
+        msg=msg,
+        n_dup=len(dups), dup_body=dup_body,
+        n_orphan=len(orphans), orphan_body=orphan_body,
+        n_stale=len(stales), stale_body=stale_body,
+    )
+
+
+@app.route("/library/dedup", methods=["POST"])
+def library_dedup():
+    """删除重复组中除保留条以外的记录。"""
+    mids = request.form.getlist("mids")
+    keep = request.form.get("keep", "")
+    n = 0
+    for mid in mids:
+        if mid == keep:
+            continue
+        if materials.delete_material(mid):
+            n += 1
+    return redirect(url_for("library_maintain", done=f"dup:{n}"))
+
+
+@app.route("/library/orphans", methods=["POST"])
+def library_orphans():
+    """清理文件已丢失的素材记录（不动视频文件）。"""
+    mids = request.form.getlist("mids")
+    n = materials.delete_many(mids)
+    return redirect(url_for("library_maintain", done=f"orphan:{n}"))
+
+
+@app.route("/library/archive", methods=["POST"])
+def library_archive():
+    """把「已发布且超过 N 天」的素材标记为已归档（可随时改回）。"""
+    days = max(7, int(request.form.get("days", "90")))
+    items = materials.archive_stale_materials(days, accounts.current_account_id())
+    n = materials.set_status_many([it["id"] for it in items], "已归档")
+    return redirect(url_for("library_maintain", done=f"archive:{n}"))
 
 
 # ---------------------------------------------------------------------------
@@ -1460,12 +1788,27 @@ def import_do():
     d = request.form.get("dir", "")
     files = request.form.getlist("files")
     paths_raw = request.form.get("paths", "")
-    n = 0
+    skip_dup = request.form.get("skip_dup", "1") not in ("0", "false", "off")
+    added = 0
+    skipped = 0
+    skipped_names = []
     if files and d:
-        n += materials.import_from_dir(d, files)
+        r = materials.import_from_dir(d, files, skip_duplicates=skip_dup)
+        added += r["added"]
+        skipped += r["skipped"]
+        skipped_names += r["skipped_names"]
     if paths_raw.strip():
         paths = [ln.strip() for ln in paths_raw.splitlines() if ln.strip()]
-        n += materials.import_paths(paths)
+        r = materials.import_paths(paths, skip_duplicates=skip_dup)
+        added += r["added"]
+        skipped += r["skipped"]
+        skipped_names += r["skipped_names"]
+
+    # 把「跳过了几个重复」如实带回去，否则用户会以为导入失败了
+    names = ("、".join(skipped_names[:5])) if skipped_names else ""
+    return redirect(
+        f"/import?dir={quote(d)}&done={added}&skip={skipped}&names={quote(names)}"
+    )
     return redirect(f"/import?dir={quote(d)}&done={n}")
 
 

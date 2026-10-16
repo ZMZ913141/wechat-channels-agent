@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<head><meta charset="utf-8"><title>复用素材</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head><body>
+<h2>复用素材到其他账号</h2>
+<p class="muted">将「{{ m.title }}」的内容（标题/文案/标签/视频/封面）复制一份到目标账号的素材库（状态重置为待发布）。</p>
+<form method="post" action="/materials/{{ m.id }}/clone">
+  <label>目标账号</label>
+  <select name="target">{% for a in accounts %}<option value="{{ a.id }}">{{ a.name or a.id }}</option>{% endfor %}</select>
+  <p><button class="btn" type="submit">复制到该账号</button> <a class="muted" href="/">取消</a></p>
+</form>
+{% endblock %}

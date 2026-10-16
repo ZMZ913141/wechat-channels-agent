@@ -1,0 +1,275 @@
+"""首页与素材库路由。"""
+import html
+import json
+import os
+import subprocess
+import sys
+
+from flask import redirect, render_template, request, url_for
+
+from .. import accounts, config, login_state, materials, media_probe, proclock
+from .base import app, BASE_DIR
+from .templating import decorate
+
+
+def _cur():
+    return accounts.current_account()
+
+
+@app.route("/")
+def index():
+    acc = _cur()
+    aid = acc["id"]
+    sf = request.args.get("status", "")
+    label_filter = request.args.get("label", "")
+    q = request.args.get("q", "")
+    sort = request.args.get("sort", "new")
+
+    items = materials.load_materials(aid)
+    if sf:
+        items = [it for it in items if it.get("status") == sf]
+    if label_filter:
+        items = materials.filter_by_label(items, label_filter)
+    if q:
+        items = [it for it in items if _match(it, q)]
+
+    if sort == "updated":
+        items.sort(key=lambda m: m.get("updated_at", ""), reverse=True)
+    elif sort == "status":
+        order = {s: i for i, s in enumerate(materials.STATUSES)}
+        items.sort(key=lambda m: order.get(m.get("status", ""), 99))
+    else:
+        items.reverse()
+
+    return render_template(
+        "index.html",
+        accounts=accounts.load_accounts(),
+        cur_account_id=aid,
+        cur_account_name=acc.get("name") or aid,
+        account_count=len(accounts.load_accounts()),
+        count=len(materials.load_materials(aid)),
+        items=[decorate(m) for m in items],
+        sf=sf, label_filter=label_filter, q=q, sort=sort,
+        all_label_names=[n for n, _ in materials.all_labels(aid)],
+        title="素材库",
+    )
+
+
+def _match(m: dict, q: str) -> bool:
+    q = (q or "").strip().lower()
+    if not q:
+        return True
+    hay = " ".join([m.get("title", ""), m.get("short_title", ""),
+                    m.get("desc", ""), m.get("tags", ""), m.get("labels", "")])
+    return q in hay.lower()
+
+
+@app.route("/switch_account", methods=["POST"])
+def switch_account():
+    aid = request.form.get("account_id")
+    if accounts.get_account(aid):
+        accounts.set_current_account(aid)
+    return redirect(url_for("index"))
+
+
+# ---------------------------------------------------------------------------
+# 素材 CRUD
+# ---------------------------------------------------------------------------
+def _apply_uploads(data: dict) -> None:
+    """把上传的视频/封面文件落到 media/，并回填路径。"""
+    for field, prefix in (("video_file", "video"), ("cover_file", "cover")):
+        f = request.files.get(field)
+        if not f or not f.filename:
+            continue
+        name = os.path.basename(f.filename.replace("\\", "/"))
+        safe = f"{prefix}_{os.path.splitext(name)[0][:40]}{os.path.splitext(name)[1]}"
+        dest_dir = materials.media_dir()
+        dest = os.path.join(dest_dir, safe)
+        f.save(dest)
+        data[field.replace("_file", "_path")] = dest
+
+
+@app.route("/materials/new", methods=["POST"])
+def new_material():
+    data = request.form.to_dict()
+    _apply_uploads(data)
+    materials.add_material(data, account_id=accounts.current_account_id())
+    return redirect(url_for("index"))
+
+
+@app.route("/materials/autofill")
+def materials_autofill():
+    """AI 智能填写：按字段生成标题/短标题/描述/话题/AI标注。
+
+    内部已做兜底：未配 Key 或调用失败时自动退回本地规则，不会卡住用户。
+    """
+    from .. import autofill
+
+    field = request.args.get("field", "title")
+    base = request.args.get("base", "")
+    hint = request.args.get("hint", "")
+    try:
+        data = autofill.autofill(name=base, hint=hint, field=field)
+    except Exception as e:
+        data = {}
+        print(f"[WARN] AI 填写异常（{field}）：{str(e)[:80]}")
+    return json.dumps({"value": (data or {}).get(field, "")}, ensure_ascii=False)
+
+
+@app.route("/materials/<mid>/edit", methods=["GET", "POST"])
+def edit_material(mid):
+    m = materials.get_material(mid)
+    if not m:
+        return redirect(url_for("index"))
+    if request.method == "POST":
+        data = request.form.to_dict()
+        _apply_uploads(data)
+        materials.update_material(mid, data)
+        return redirect(url_for("index"))
+    from .views_accounts import login_badge_html
+
+    return render_template(
+        "material_edit.html",
+        m=decorate(m),
+        status_opts=materials.STATUSES,
+        ai_opts=[v for v in materials.AI_DECLARE_OPTIONS if v != "非AI内容"],
+        vis_opts=materials.VISIBILITY_OPTIONS,
+        login_badge=login_badge_html(m.get("account_id", "")),
+        title="编辑素材",
+    )
+
+
+@app.route("/materials/<mid>/cover", methods=["POST"])
+def upload_cover(mid):
+    f = request.files.get("cover_file")
+    if f and f.filename:
+        name = os.path.basename(f.filename.replace("\\", "/"))
+        dest = os.path.join(materials.media_dir(),
+                            "cover_" + os.path.splitext(name)[0][:40] + os.path.splitext(name)[1])
+        f.save(dest)
+        materials.update_material(mid, {"cover_path": dest})
+    return redirect(url_for("edit_material", mid=mid))
+
+
+@app.route("/materials/<mid>/delete")
+def delete_material_route(mid):
+    materials.delete_material(mid)
+    return redirect(url_for("index"))
+
+
+@app.route("/materials/batch", methods=["POST"])
+def materials_batch():
+    mids = request.form.getlist("mids")
+    op = request.form.get("op", "")
+    if not mids:
+        return redirect(url_for("index"))
+    if op == "delete":
+        materials.delete_many(mids)
+    elif op.startswith("mark_"):
+        st = op[len("mark_"):]
+        if st in materials.STATUSES:
+            materials.set_status_many(mids, st)
+    elif op in ("label_add", "label_replace", "label_remove"):
+        mode = {"label_add": "add", "label_replace": "replace", "label_remove": "remove"}[op]
+        materials.set_labels_many(mids, request.form.get("labels", ""), mode=mode)
+    return redirect(url_for("index"))
+
+
+@app.route("/materials/<mid>/status")
+def status_route(mid):
+    st = request.args.get("status", "")
+    if st in materials.STATUSES:
+        materials.set_status(mid, st)
+    return redirect(url_for("index"))
+
+
+@app.route("/materials/<mid>/clone", methods=["GET", "POST"])
+def clone_material_route(mid):
+    src = materials.get_material(mid)
+    if not src:
+        return redirect(url_for("index"))
+    if request.method == "POST":
+        target = request.form.get("target_account", "")
+        if target and accounts.get_account(target):
+            materials.clone_material(mid, target)
+        return redirect(url_for("index"))
+    return render_template(
+        "material_clone.html",
+        m=src,
+        accounts=[a for a in accounts.load_accounts() if a.get("enabled", True)],
+        title="复用素材到其他账号",
+    )
+
+
+# ---------------------------------------------------------------------------
+# 本地文件服务（缩略图、封面预览）
+# ---------------------------------------------------------------------------
+def _safe_name(name: str) -> str:
+    """只允许安全文件名，防止 ../ 穿越。"""
+    if not name or name.startswith("/") or ".." in name:
+        return ""
+    return os.path.basename(name.replace("\\", "/"))
+
+
+@app.route("/media/<path:name>")
+def media_file(name):
+    """按**绝对路径**提供本地媒体（素材可能散落在任意磁盘位置）。
+
+    ⚠️ 这条路由等于开放了任意文件读取。之所以可接受：本工具只绑 127.0.0.1、
+    单机自用。若将来要改host="0.0.0.0" 暴露到局域网，必须先加鉴权。
+    """
+    import mimetypes
+
+    ap = os.path.abspath(name.replace("/", os.sep))
+    if not os.path.isfile(ap):
+        return ("文件不存在", 404)
+    if ap.lower().endswith((".mp4", ".mov", ".webm", ".m4v")):
+        return _send_video(ap)
+    mime = mimetypes.guess_type(ap)[0] or "application/octet-stream"
+    from flask import send_from_directory
+
+    d, base = os.path.split(ap)
+    return send_from_directory(d, base, mimetype=mime)
+
+
+def _send_video(ap: str):
+    """视频要支持 Range 请求，否则浏览器无法拖动进度条。"""
+    from flask import Response
+
+    size = os.path.getsize(ap)
+    mime = "video/mp4" if ap.lower().endswith((".mp4", ".m4v")) else "video/mp4"
+    rng = request.headers.get("Range", "")
+    if not rng:
+        def gen():
+            with open(ap, "rb") as f:
+                while True:
+                    chunk = f.read(1024 * 512)
+                    if not chunk:
+                        break
+                    yield chunk
+
+        return Response(gen(), mimetype=mime, headers={"Accept-Ranges": "bytes"})
+    try:
+        s, e = rng.replace("bytes=", "").split("-")
+        start = int(s) if s else 0
+        end = int(e) if e else size - 1
+        end = min(end, size - 1)
+        length = end - start + 1
+    except Exception:
+        return Response(b"", status=416, mimetype=mime)
+
+    def gen_range():
+        with open(ap, "rb") as f:
+            f.seek(start)
+            left = length
+            while left > 0:
+                chunk = f.read(min(1024 * 256, left))
+                if not chunk:
+                    break
+                left -= len(chunk)
+                yield chunk
+
+    return Response(
+        gen_range(), 206, mimetype=mime,
+        headers={"Content-Range": f"bytes {start}-{end}/{size}", "Accept-Ranges": "bytes"},
+    )

@@ -1,0 +1,62 @@
+<form method="post" action="/materials/new" enctype="multipart/form-data">
+  <div class="fillbar" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:4px">
+    <div style="flex:2;min-width:220px"><label>✨ 智能填写：视频文件名或路径</label>
+      <input id="af_name" placeholder="d:/videos/AI模特上新.mp4 或只填文件名"></div>
+    <div style="flex:3;min-width:220px"><label>补充提示（可选，如：女装秋冬新款，温柔风）</label>
+      <input id="af_hint" placeholder="告诉 AI 这条视频讲什么，生成更准"></div>
+    <div><label>&nbsp;</label>
+      <button class="btn ghost" type="button" id="af_btn" onclick="doAutofill()">✨ 一键生成全部</button></div>
+  </div>
+  <div id="af_note" class="muted" style="font-size:12px;min-height:18px"></div>
+  <div class="grid2">
+    <div><label>标题 * <button class="genbtn" type="button" onclick="genField('title')">✨ 生成</button></label>
+      <input name="title" id="f_title" required></div>
+    <div><label>短标题 <span class="muted">（6-16字）</span> <button class="genbtn" type="button" onclick="genField('short_title')">✨ 生成</button></label>
+      <input name="short_title" id="f_short" maxlength="16"></div>
+  </div>
+  <label>描述 / 文案 <span class="muted">（官方上限 1000 字，重要信息放前两行）</span>
+    <button class="genbtn" type="button" onclick="genField('desc')">✨ 生成</button></label>
+  <textarea name="desc" id="f_desc" placeholder="可含 #话题 标签"></textarea>
+  <label>话题标签（逗号分隔，自动加 #，建议 5-8 个）
+    <button class="genbtn" type="button" onclick="genField('tags')">✨ 生成</button></label>
+  <input name="tags" id="f_tags" placeholder="干货,教程">
+  <label>分类标签 <span class="muted">（逗号分隔，仅用于自己检索管理，不会发布出去）</span></label>
+  <input name="labels" id="f_labels" placeholder="待剪辑,爆款,双十一" list="dl_labels">
+  <datalist id="dl_labels">{{ label_options|safe }}</datalist>
+  <div class="grid2">
+    <div><label>视频标注 <span class="muted">（AI 内容依法须声明）</span>
+        <button class="genbtn" type="button" onclick="genField('ai_declare')">✨ 生成</button></label>
+      <select name="ai_declare" id="f_ai">
+        <option value="">不标注（非 AI 内容）</option>
+        <option value="内容为AI制作">内容为AI制作</option>
+        <option value="内容为虚构剧情">内容为虚构剧情</option>
+      </select></div>
+    <div><label>可见范围</label>
+      <select name="visibility">
+        <option>公开</option><option>仅好友可见</option><option>私密</option>
+      </select></div>
+  </div>
+  <div class="grid2">
+    <div><label>声明原创</label>
+      <select name="original"><option value="true" selected>是（默认勾选：展示原创标记，有机会获得广告收入）</option><option value="">否</option></select></div>
+    <div><label>定时发表 <span class="muted">（留空=立即；助手端专属功能）</span></label>
+      <input type="datetime-local" name="scheduled_at"></div>
+  </div>
+  <div class="grid2">
+    <div>
+      <label>视频文件（可上传或填本地路径；官方限制：≤4G / ≤2小时 / ≥720p）</label>
+      <div class="drop" id="vdrop">点击选择 或 拖拽视频文件到这里（可选）</div>
+      <input type="file" name="video_file" id="vfile" accept="video/*,image/*" style="display:none">
+      <div id="vprev" style="margin-top:6px"></div>
+      <input name="video_path" id="f_vpath" placeholder="或填本地路径 d:/videos/demo.mp4" oninput="syncName(this.value)">
+    </div>
+    <div>
+      <label>封面图（可上传或填本地路径）</label>
+      <div class="drop" id="cdrop">点击选择 或 拖拽图片到这里（可选）</div>
+      <input type="file" name="cover_file" id="cfile" accept="image/*" style="display:none">
+      <div id="cprev" style="margin-top:6px"></div>
+      <input name="cover_path" placeholder="或填本地路径 d:/videos/cover.jpg">
+    </div>
+  </div>
+  <p><button class="btn" type="submit">保存素材</button> <span class="muted">也可以用顶部「目录导入」从本地文件夹批量导入（支持粘贴路径）。</span></p>
+</form>

@@ -1,0 +1,31 @@
+{# 账号列表中的一行 #}
+{% for a in rows %}
+<tr>
+  <td><code>{{ a.id }}</code></td>
+  <td>{{ a.name }}</td>
+  <td class="muted"><code>{{ a.profile_dir }}</code></td>
+  <td>
+    <form method="post" action="/accounts/{{ a.id }}/channel" style="display:flex;gap:6px;align-items:center">
+      <select name="channel" onchange="this.form.submit()" style="padding:4px 6px;font-size:12px">
+        {% for val, label in channels.items() %}
+        <option value="{{ val }}"{{ ' selected' if accounts_channel(a) == val else '' }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </td>
+  <td>{{ '✔ 启用' if a.enabled else '— 停用' }}</td>
+  <td>{{ '● 当前' if a.id == cur else '' }}</td>
+  <td>{{ login_badge(a.id)|safe }}</td>
+  <td>
+    <a class="btn" href="/accounts/{{ a.id }}/login">扫码登录</a>
+    <a class="ghost btn" href="/accounts/{{ a.id }}/probe">检测登录</a>
+    <a class="ghost btn" href="/open_publish?account={{ a.id }}">打开发表页</a>
+    {% if a.id != cur %}
+    <a class="ghost btn" href="/accounts/{{ a.id }}/set_current">设为当前</a>
+    {% endif %}
+    <a class="ghost btn" href="/accounts/{{ a.id }}/resume">解除暂停</a>
+    <a class="ghost btn" href="/accounts/{{ a.id }}/delete"
+       onclick="return confirm('确认删除该账号？（只删配置，浏览器档案目录保留）')">删除</a>
+  </td>
+</tr>
+{% endfor %}

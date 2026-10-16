@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% from "macros/macros.html" import material_card with context %}
+{% block title %}{{ APP_NAME }} · 管理面板{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="accbar">
+    <span class="muted">当前账号：</span>
+    <form method="post" action="/switch_account" style="display:inline">
+      <select name="account_id" onchange="this.form.submit()">
+        {% for a in accounts %}
+        <option value="{{ a.id }}"{{ ' selected' if a.id == cur_account_id else '' }}>{{ a.name or a.id }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <span class="muted">（{{ account_count }} 个账号）</span>
+    <a class="btn ghost" href="/accounts">＋ 管理/新增账号</a>
+    <a class="btn ghost" href="/open_publish?account={{ cur_account_id }}" target="_blank" title="为该账号打开视频号发表页，登录态独占，不会和发布任务打架">打开发表页（{{ cur_account_name }}）</a>
+  </div>
+</div>
+
+<div class="maingrid">
+  <div class="col">
+    <div class="card">
+      <h2>素材库 <span class="sub">{{ count }} 条 · 当前账号</span>
+        <span class="chips" style="margin-left:auto">
+          <a class="{{ 'on' if not sf and not label_filter else '' }}" href="/">全部</a>
+          <a class="{{ 'on' if sf == '待发布' else '' }}" href="/?status=待发布">待发布</a>
+          <a class="{{ 'on' if sf == '草稿' else '' }}" href="/?status=草稿">草稿</a>
+          <a class="{{ 'on' if sf == '已发布' else '' }}" href="/?status=已发布">已发布</a>
+          <a class="{{ 'on' if sf == '已归档' else '' }}" href="/?status=已归档">已归档</a>
+        </span>
+      </h2>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:-2px 0 10px">
+        {{ library_summary(cur_account_id)|safe }}
+        <a class="btn ghost" style="margin-left:auto" href="/library/maintain"
+           title="查重、清理文件丢失的素材、归档过期已发布素材">🧹 素材库维护</a>
+      </div>
+      <div class="searchbar">
+        <form method="get" action="/" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <input type="hidden" name="status" value="{{ sf }}">
+          <input type="hidden" name="label" value="{{ label_filter }}">
+          <input name="q" value="{{ q }}" placeholder="🔍 搜索标题 / 文案 / 标签…">
+          <select name="sort">
+            <option value="new"{{ ' selected' if sort == 'new' else '' }}>最新创建</option>
+            <option value="updated"{{ ' selected' if sort == 'updated' else '' }}>最近更新</option>
+            <option value="status"{{ ' selected' if sort == 'status' else '' }}>按状态</option>
+          </select>
+          <button class="btn ghost" type="submit">筛选</button>
+        </form>
+      </div>
+      <form method="post" action="/materials/batch" id="batchForm">
+      <div class="batchbar" id="batchbar" style="display:none">
+        <span class="muted">已选 <b id="selCount">0</b> 项：</span>
+        <button class="btn ghost" type="submit" name="op" value="mark_已发布" onclick="return setOp('mark_已发布')">标为已发布</button>
+        <button class="btn ghost" type="submit" name="op" value="mark_待发布" onclick="return setOp('mark_待发布')">标为待发布</button>
+        <button class="btn ghost" type="submit" name="op" value="mark_草稿" onclick="return setOp('mark_草稿')">标为草稿</button>
+        <button class="btn ghost" type="submit" name="op" value="mark_已归档" onclick="return setOp('mark_已归档')">归档</button>
+        <span class="muted" style="margin-left:6px">标签</span>
+        <input name="labels" list="dl_labels" placeholder="逗号分隔"
+               style="width:150px;padding:4px 8px;background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:6px;font-size:12px">
+        <datalist id="dl_labels">{% for n in all_label_names %}<option value="{{ n }}">{% endfor %}</datalist>
+        <button class="btn ghost" type="submit" name="op" value="label_add" onclick="return setOp('label_add')" title="给所选素材追加标签">打标签</button>
+        <button class="btn ghost" type="submit" name="op" value="label_remove" onclick="return setOp('label_remove')" title="移除所选标签">移除</button>
+        <button class="btn danger" type="submit" name="op" value="delete" onclick="return confirm('确认批量删除所选素材？（只删记录，视频文件不动）')">批量删除</button>
+        <a class="mini" href="javascript:void(0)" onclick="toggleSelect(true)">全选</a>
+        <a class="mini" href="javascript:void(0)" onclick="toggleSelect(false)">取消全选</a>
+      </div>
+
+      {{ label_cloud(cur_account_id, label_filter)|safe }}
+      {% if items %}
+      <div class="grid-mat">
+        {% for m in items %}{{ material_card(m, label_filter) }}{% endfor %}
+      </div>
+      {% else %}
+      <p class="muted">
+        {%- if q or sf or label_filter -%}
+        没有匹配的素材（当前筛选条件下）。
+        {%- else -%}
+        还没有素材，先在右侧新建一条，或用「目录导入」批量导入。
+        {%- endif -%}
+      </p>
+      {% endif %}
+      </form>
+    </div>
+  </div>
+  <div class="col">
+    <div class="card">
+      <h2>新建素材 <span class="sub">支持本地路径或上传文件</span></h2>
+      {% include 'partials/new_material_form.html' %}
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast">已复制到剪贴板</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='index.js') }}"></script>
+{% endblock %}

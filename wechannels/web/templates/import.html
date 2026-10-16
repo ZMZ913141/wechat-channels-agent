@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>目录导入</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head><body>
+<div class="wrap">
+<header>
+  <h2>从本地目录导入素材</h2>
+  <div><a class="btn ghost" href="/">← 返回面板</a>
+    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙 夜视</button></div>
+</header>
+<p class="muted">把本地视频文件夹连接到素材库，勾选批量导入（标题默认取文件名）。支持 mp4/mov/webm/mkv/avi/flv/ts。</p>
+{{ msg|safe }}
+
+<div class="card">
+  <div class="ways">
+    <div class="way">
+      <span class="tagline">方式一</span>
+      <h3>扫描本地目录</h3>
+      <form method="get" action="/import">
+        <label>目录路径（不递归，只列出该目录下的视频文件）</label>
+        <input name="dir" value="{{ dir }}" placeholder="d:/videos/待发布">
+        <p><button class="btn" type="submit">扫描目录</button></p>
+      </form>
+    </div>
+    <div class="way">
+      <span class="tagline">方式二</span>
+      <h3>粘贴文件路径批量导入</h3>
+      <form method="post" action="/import/do">
+        <label>每行一个路径，支持任意位置的文件</label>
+        <textarea name="paths" placeholder="d:/videos/a.mp4&#10;d:/videos/b.mov&#10;e:/素材/新品上架.mp4"></textarea>
+        <p><button class="btn" type="submit">按路径批量导入到当前账号</button></p>
+      </form>
+    </div>
+  </div>
+</div>
+
+{{ files_html|safe }}
+</div>
+{% block scripts %}
+<script src="{{ url_for('static', filename='import.js') }}"></script>
+{% endblock %}
+{% endblock %}

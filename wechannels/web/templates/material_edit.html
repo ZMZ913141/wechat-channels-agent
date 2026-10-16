@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block content %}
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>编辑素材</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head><body>
+<div class="wrap">
+<header>
+  <h2>编辑素材</h2>
+  <div><a class="btn ghost" href="/">← 返回面板</a>
+    <a class="btn ghost" href="/publish?material={{ m.id or "" }}">去发布</a>
+    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙 夜视</button></div>
+</header>
+
+<form method="post" action="/materials/{{ m.id or "" }}/edit" enctype="multipart/form-data">
+  <div class="card">
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <div style="flex:2;min-width:200px"><label>✨ 智能填写：视频文件名或路径</label>
+        <input id="af_name" placeholder="d:/videos/AI模特上新.mp4 或只填文件名"></div>
+      <div style="flex:3;min-width:200px"><label>补充提示（可选，如：女装秋冬新款，温柔风）</label>
+        <input id="af_hint" placeholder="告诉 AI 这条视频讲什么，生成更准"></div>
+      <div><label>&nbsp;</label>
+        <button class="btn ghost" type="button" id="af_btn" onclick="doAutofill()">✨ 一键生成全部</button></div>
+    </div>
+    <div id="af_note" class="muted" style="min-height:18px"></div>
+  </div>
+
+  <div class="card">
+    <div class="g2">
+      <div><label>标题 <button class="genbtn" type="button" onclick="genField('title')">✨ AI填写</button></label>
+        <input name="title" id="f_title" value="{{ m.title or "" }}"></div>
+      <div><label>短标题 <span class="muted">（6-16字）</span>
+          <button class="genbtn" type="button" onclick="genField('short_title')">✨ AI填写</button></label>
+        <input name="short_title" id="f_short" maxlength="16" value="{{ m.short_title or "" }}"></div>
+    </div>
+    <label>描述 / 文案
+      <button class="genbtn" type="button" onclick="genField('desc')">✨ AI填写</button></label>
+    <textarea name="desc" id="f_desc">{{ m.desc or "" }}</textarea>
+    <label>话题标签（逗号分隔，自动加 #）
+      <button class="genbtn" type="button" onclick="genField('tags')">✨ AI填写</button></label>
+    <input name="tags" id="f_tags" value="{{ m.tags or "" }}">
+  </div>
+
+  <div class="card">
+    <label>分类标签 <span class="muted">（逗号分隔，仅用于自己检索管理，<b>不会</b>发布出去）</span></label>
+    <input name="labels" id="f_labels" value="{{ m.labels_list|join(",") }}" placeholder="待剪辑,爆款,双十一" list="dl_labels_e">
+    <datalist id="dl_labels_e">{% for n in all_label_names %}<option value="{{ n }}">{% endfor %}</datalist>
+    <div class="mtags" style="margin-top:8px">{% for lb in m.labels_list %}<a class="lchip" href="/?label={{ lb|urlencode }}">{{ lb }}</a>{% endfor %}</div>
+  </div>
+
+  <div class="card">
+    <div class="g2">
+      <div>
+        <label>视频文件（可上传/拖拽，或填本地路径）</label>
+        <div class="drop" id="vdrop">点击选择 或 拖拽视频文件到这里</div>
+        <input type="file" name="video_file" id="vfile" accept="video/*,image/*" style="display:none">
+        <div class="thumbs" id="vprev">{% if m.video_path %}<video src="/media/{{ m.video_path }}" muted preload="metadata"></video>{% endif %}</div>
+        <input name="video_path" id="f_vpath" value="{{ m.video_path or "" }}" placeholder="或填本地路径 d:/videos/demo.mp4"
+               oninput="syncName(this.value)">
+      </div>
+      <div>
+        <label>封面图（可上传/拖拽，或填本地路径）</label>
+        <div class="drop" id="cdrop">点击选择 或 拖拽图片到这里</div>
+        <input type="file" name="cover_file" id="cfile" accept="image/*" style="display:none">
+        <div class="thumbs" id="cprev">{% if m.cover_path %}<img src="/media/{{ m.cover_path }}" alt="">{% endif %}</div>
+        <input name="cover_path" id="f_cpath" value="{{ m.cover_path or "" }}" placeholder="或填本地路径 d:/videos/cover.jpg">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="g2">
+      <div><label>视频标注 <span class="muted">（AI 内容依法必须声明）</span>
+          <button class="genbtn" type="button" onclick="genField('ai_declare')">✨ AI填写</button></label>
+        <select name="ai_declare" id="f_ai">{% for v in ai_opts %}<option value="{{ v }}"{{ ' selected' if m.ai_declare == v else '' }}>{{ v }}</option>{% endfor %}</select></div>
+      <div><label>可见范围</label>
+        <select name="visibility">{% for v in vis_opts %}<option{{ ' selected' if (m.visibility or '公开') == v else '' }}>{{ v }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="law">⚖️ 依据《人工智能生成合成内容标识办法》（2025-09-01 施行），AI 生成/合成的视频发布时必须主动声明。</div>
+    <div class="g2">
+      <div><label>定时发表（留空=立即）</label>
+        <input type="datetime-local" name="scheduled_at" value="{{ m.scheduled_at|dt_local }}"></div>
+      <div><label>扩展链接</label><input name="ext_link" value="{{ m.ext_link or "" }}" placeholder="https://mp.weixin.qq.com/s/..."></div>
+    </div>
+    <div class="g2">
+      <div><label>声明原创</label>
+        <select name="original"><option value="" {{ "" if m.original else "checked" }}>否</option><option value="true" {{ "checked" if m.original }}>是</option></select></div>
+      <div><label>状态</label><select name="status">{% for s in status_opts %}<option{{ ' selected' if m.status == s else '' }}>{{ s }}</option>{% endfor %}</select></div>
+    </div>
+  </div>
+
+  <p><button class="btn" type="submit">保存</button> <a class="muted" href="/" style="margin-left:10px">返回</a></p>
+</form>
+
+<div class="card">
+  <h3 style="margin:0 0 8px;font-size:14px">发布状态记录</h3>
+  {% if m.publish_history %}
+  <div class="histwrap">{% for h in m.publish_history|reverse %}
+  <div class="hist">{{ '✅' if h.ok else '❌' }} {{ h.time }} → {{ h.account_name }}
+    <span class="{{ 'ok' if h.ok else 'bad' }}">{{ h.result[:80] }}</span></div>{% endfor %}</div>
+{% else %}<p class="muted">还没有发布记录。每次同步发布的结果会自动记录在这里。</p>{% endif %}
+</div>
+</div>
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='material_form.js') }}"></script>
+{% endblock %}
+{% endblock %}

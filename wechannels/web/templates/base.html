@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}{{ APP_NAME }}{% endblock %}</title>
+<script>
+  /* 主题读取必须在 head 内联执行，否则首屏会闪白 */
+  (function(){try{var t=localStorage.getItem('theme')||'dark';
+    document.documentElement.setAttribute('data-theme',t);}catch(e){}})();
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+<script src="{{ url_for('static', filename='theme.js') }}"></script>
+</head>
+<body>
+<header>
+  <h1><a href="/" style="color:inherit;text-decoration:none">{% block heading %}{{ APP_NAME }} · 管理面板{% endblock %}</a></h1>
+  <div class="nav">
+    <a href="/publish">同步发布</a>
+    <a href="/import">目录导入</a>
+    <a href="/accounts">账号</a>
+    {% block nav_extra %}{% endblock %}
+    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙 夜视</button>
+  </div>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+{% block scripts %}{% endblock %}
+</body></html>

@@ -1,0 +1,26 @@
+{# 重复素材分组 #}
+{% if dups %}
+  {% for g in dups %}
+  <form method="post" action="/library/dedup" class="grp">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <b class="ellip">{{ g.name }}</b>
+      <span class="muted">{{ g.items|length }} 条重复</span>
+    </div>
+    {% for it in g.items %}
+    <div class="row">
+      <span class="st">{{ it.status }}</span>
+      <div class="grow ellip" title="{{ it.video_path }}">{{ it.title or '(无标题)' }}</div>
+      <span class="muted">{{ it.updated_at[:16] }}</span>
+    </div>
+    {% endfor %}
+    {# 除第一条外全部放进删除列表，第一条作为保留项 #}
+    {% for it in g.items %}{% if not loop.first %}<input type="hidden" name="mids" value="{{ it.id }}">{% endif %}{% endfor %}
+    <input type="hidden" name="keep" value="{{ g.items[0].id }}">
+    <button class="btn danger" style="margin-top:8px;padding:5px 12px;font-size:12px" type="submit">
+      删除冗余 {{ g.items|length - 1 }} 条（保留第一条）
+    </button>
+  </form>
+  {% endfor %}
+{% else %}
+<div class="empty">没有发现重复素材 ✓</div>
+{% endif %}

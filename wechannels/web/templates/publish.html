@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<head><meta charset="utf-8"><title>发布中心</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head><body>
+<h2>发布中心 <span class="muted">（仿官方发布页 1:1 字段 · 一条视频同步发多个视频号）</span></h2>
+<p><a href="/">返回面板</a></p>
+<div class="card">
+  <div class="pubgrid">
+    <div class="preview">
+      <div class="pv-thumb" id="pv_thumb">{% if m %}{% if m and m.cover_path %}<img src="/media/{{ m.cover_path }}" alt="">{% else %}<video src="/media/{{ m.video_path }}" muted preload="metadata"></video>{% endif %}{% endif %}</div>
+      <div class="pv-body">
+        <div class="pv-title" id="pv_title">{{ (m.short_title or m.title) if m else "（未选择素材）" }}</div>
+        <div class="pv-desc" id="pv_desc">{% if m %}{{ copy_text(m) }}{% else %}（暂无文案）{% endif %}</div>
+      </div>
+      <div class="pv-cover">{% if m %}<form method="post" action="/materials/{{ m.id }}/cover" enctype="multipart/form-data">
+<label>自定义封面</label><input type="file" name="cover_file" accept="image/*" onchange="this.form.submit()" style="padding:4px">
+{% if m and m.cover_path %}<div class="muted" style="font-size:11px;margin-top:4px">已设置：{{ m.cover_path }}</div>{% endif %}
+</form>{% endif %}</div>
+    </div>
+    <div>
+      <form method="post" action="/publish/start">
+        {{ probe_html|safe }}
+        <label>选择素材（仅列出视频文件存在的素材）</label>
+        <select name="material_id" id="matSel" onchange="location.href='/publish?material='+this.value">{% if valid %}{% for v in valid|reverse %}
+<option value="{{ v.id }}"{{ ' selected' if mat and v.id == mat.id else '' }}>{{ v.title or '(无标题)' }}（{{ v.video_path }}）</option>
+{% endfor %}{% else %}<option value="">（当前账号还没有可用素材，先回面板新建）</option>{% endif %}</select>
+        <label>短标题 <span class="muted">（6-16 字，展示在搜索/话题/红点；留空则用素材里配置）</span>
+          <span id="st_count" class="muted"></span>
+          <button type="button" class="genbtn" onclick="genField('short_title')">✨ AI填写</button></label>
+        <input name="short_title" id="p_short" maxlength="16" value="{{ (m.short_title or "") if m else "" }}" oninput="checkShort()">
+        <label>描述 / 文案 <span class="muted">（官方上限 1000 字；留空则用素材里配置）</span>
+          <button type="button" class="genbtn" onclick="genField('desc')">✨ AI填写</button></label>
+        <textarea name="desc" id="p_desc">{{ (m.desc or "") if m else "" }}</textarea>
+        <label>话题标签（逗号分隔，自动加 #）
+          <button type="button" class="genbtn" onclick="genField('tags')">✨ AI填写</button></label>
+        <input name="tags" id="p_tags" value="{{ (m.tags or "") if m else "" }}">
+        <div id="af_note"></div>
+        <div class="law">⚖️ 依据《人工智能生成合成内容标识办法》（2025-09-01 施行），AI 生成/合成的视频发布时必须主动声明，未声明将被限流、下架甚至封号。</div>
+        <label>视频标注 <span class="muted">（AI 视频务必选「内容为AI制作」）</span></label>
+        <select name="ai_declare">
+          {% for v in ai_opts %}<option value="{{ v }}"{{ ' selected' if (m and m.ai_declare == v) else '' }}>{{ v }}</option>{% endfor %}
+        </select>
+        <div class="checks">
+          <label><input type="checkbox" name="original" value="true" {{ "checked" if (not m or m.original) }}> 声明原创（展示原创标记，有机会获得广告收入）</label>
+          <label><input type="checkbox" name="allow_download" value="true" {{ "checked" if m and m.allow_download }}> 允许他人下载视频</label>
+          <label><input type="checkbox" name="allow_comment" value="true" {{ "checked" if (not m or m.allow_comment is not defined or m.allow_comment) }}> 允许评论</label>
+        </div>
+        <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>可见范围</label>
+            <select name="visibility">{% for v in vis_opts %}<option{{ ' selected' if m and (m.visibility or '公开') == v else '' }}>{{ v }}</option>{% endfor %}</select></div>
+          <div><label>定时发表 <span class="muted">（助手端专属；留空=立即发表）</span></label>
+            <input type="datetime-local" name="scheduled_at" value="{{ m.scheduled_at|dt_local if m else "" }}"></div>
+        </div>
+        <label>扩展链接 <span class="muted">（公众号文章需近 7 天发表且阅读量超 10000；选填）</span></label>
+        <input name="ext_link" value="{{ (m.ext_link or "") if m else "" }}" placeholder="https://mp.weixin.qq.com/s/...">
+        <label>选择要发布的账号（可多选，将按顺序逐号发布）</label>
+        <div class="accs">{% for a in accounts %}
+<label title="{{ a.profile_dir }}"><input type="checkbox" name="accounts" value="{{ a.id }}"{{ ' checked' if a.id == cur_account_id else '' }}> {{ a.name or a.id }}（{{ a.id }}）{{ login_badge(a.id)|safe }}</label>
+{% endfor %}</div>
+        <p class="muted">发布由确定性Playwright 直填表单完成（零token），以上配置会逐号自动动填写；默认有头浏览器可肉眼确认；发布期间对应账号的私信监控会暂停（文件锁互斥）。</p>
+        <button class="btn" type="submit">开始同步发布</button>
+      </form>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <h3>最近一次发布任务 <span id="autoref" class="muted" style="font-size:12px"></span></h3>
+  <div id="jobwrap">{% include 'partials/job_status.html' %}</div>
+</div>
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='publish.js') }}"></script>
+{% endblock %}
+{% endblock %}

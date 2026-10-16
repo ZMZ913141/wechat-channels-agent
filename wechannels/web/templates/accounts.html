@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<head>{% block head_extra %}{% endblock %}</head><body>
+<h2>账号管理</h2>
+<p><a href="/">返回面板</a></p>
+{{ msg|safe }}
+<div class="card">
+  <h3>新增账号</h3>
+  <form method="post" action="/accounts/new">
+    <div class="grid">
+      <div><label>账号ID（英文/数字，唯一，留空自动生成）</label><input name="id" placeholder="acc2"></div>
+      <div><label>展示名</label><input name="name" placeholder="副号-带货"></div>
+      <div><label>浏览器档案目录（留空自动 profiles/xxx）</label><input name="profile_dir" placeholder="profiles/acc2"></div>
+    </div>
+    <label>启用监控</label>
+    <select name="enabled"><option value="true">是</option><option value="false">否</option></select>
+    <label>浏览器内核（建议两个账号各选一个，例如一个 Chrome、一个 Edge）</label>
+    <select name="channel">
+      <option value="">自动（本机 Chrome/Edge）</option>
+      <option value="chrome">Google Chrome</option>
+      <option value="msedge">Microsoft Edge</option>
+      <option value="chromium">内置 Chromium（备选）</option>
+    </select>
+    <p><button class="btn" type="submit">添加</button></p>
+  </form>
+</div>
+<div class="card">
+  <h3>已有账号</h3>
+  <p class="muted">「扫码登录」会弹出一个浏览器窗口：未登录时页面会出现二维码，用微信扫码并确认即可；登录态会保存到该账号的档案目录，之后发布/监控都免扫码。每个账号要分别扫一次（用对应的微信号扫）。</p>
+  <p class="muted">✅ <b>不同账号 = 不同的浏览器</b>：每个账号都有自己独立的档案目录（登录态互不影响），再配合下面「浏览器内核」可分别指定 <b>Chrome / Edge</b>。所以两个账号可以<b>同时打开、同时操作、互不打架</b>。</p>
+  <p class="muted">⚠️ 唯一的限制是<b>同一个账号</b>不能被两个进程同时打开（Chromium 的硬规则：一个档案同一时刻只能被一个进程占用）。因此面板点「扫码登录 / 打开发表页」时会自动为<b>这个账号</b>暂停后台监控（把档案让出来），关掉窗口后自动恢复；<b>其它账号不受影响，监控照常</b>。手动用终端跑 monitor_dm.py 的话请先 Ctrl+C，否则会出现「明明刚登录过，打开发表页却是未登录」。</p>
+  <table><tr><th>ID</th><th>名称</th><th>档案目录</th><th>浏览器内核</th><th>状态</th><th>当前</th><th>登录态 / 实际视频号</th><th>操作</th></tr>
+  {% include 'partials/account_rows.html' %}
+  </table>
+</div>
+{% endblock %}

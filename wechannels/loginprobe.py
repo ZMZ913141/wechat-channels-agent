@@ -153,14 +153,23 @@ def probe(page, wait_s: int = 20) -> dict:
     nick = nickname_from_page(page)
     out["nickname"] = nick
     out["placeholder"] = is_placeholder(nick)
-    # 「跳到内容管理页」+「昵称不是占位符」= 可信身份
+
+    # 判定登录态：以 URL 为准，但**若读到了非占位昵称则认定已登录**。
+    # 实测踩过的坑：SPA 渲染慢时 probe 会走超时分支，此时 URL 仍是
+    # /platform/post/create（明明已登录）却被判成 logged_in=false，
+    # 面板进而显示「未真正登录」——误导用户去重扫码。
+    if nick and not out["placeholder"] and "/login" not in (out["url"] or ""):
+        out["logged_in"] = True
+
     out["verified"] = bool(out["logged_in"] and nick and not out["placeholder"])
     if out["placeholder"]:
         out["detail"] = f"昵称显示为默认占位「{nick}」，该档案很可能未真正登录"
+    elif out["verified"]:
+        out["detail"] = "已登录，昵称可信"
     elif not nick:
         out["detail"] = "已登录但读不到昵称（页面结构可能已改版）"
-    elif out["logged_in"]:
-        out["detail"] = "已登录，昵称可信"
+    else:
+        out["detail"] = "未登录"
     return out
 
 
@@ -280,25 +289,30 @@ def display_name(account: dict, fallback: str = "") -> dict:
     if s.get("verified") and nick:
         # 最理想：显示真实昵称，你的命名作为副标题
         return {"primary": nick, "secondary": label, "tone": "ok",
-                "verified": True, "placeholder": False,
+                "verified": True, "placeholder": False, "known": True,
+                "logged_in": True,
                 "detail": s.get("detail", ""), "at": s.get("at", "")}
 
     if s.get("placeholder"):
         # 昵称是"微信用户"这类占位 → 明确警示，绝不把它当身份显示
         return {"primary": label, "secondary": "未真正登录（昵称显示占位符）",
-                "tone": "bad", "verified": False, "placeholder": True,
+                "tone": "bad", "verified": False, "placeholder": True, "known": True,
+                "logged_in": False,
                 "detail": s.get("detail", ""), "at": s.get("at", "")}
 
     if s.get("logged_in") and not nick:
         return {"primary": label, "secondary": "已登录，昵称未读到",
-                "tone": "warn", "verified": False, "placeholder": False,
+                "tone": "warn", "verified": False, "placeholder": False, "known": True,
+                "logged_in": True,
                 "detail": s.get("detail", ""), "at": s.get("at", "")}
 
     if s.get("known"):
         return {"primary": label, "secondary": "未登录",
-                "tone": "bad", "verified": False, "placeholder": False,
+                "tone": "bad", "verified": False, "placeholder": False, "known": True,
+                "logged_in": False,
                 "detail": s.get("detail", ""), "at": s.get("at", "")}
 
     return {"primary": label, "secondary": "尚未检测登录态",
-            "tone": "warn", "verified": False, "placeholder": False,
+            "tone": "warn", "verified": False, "placeholder": False, "known": False,
+            "logged_in": None,
             "detail": "", "at": ""}

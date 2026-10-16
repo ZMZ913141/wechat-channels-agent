@@ -20,6 +20,8 @@
     <a class="btn" href="/accounts/{{ a.id }}/login">扫码登录</a>
     <a class="ghost btn" href="/accounts/{{ a.id }}/probe">检测登录</a>
     <a class="ghost btn" href="/open_publish?account={{ a.id }}">打开发表页</a>
+    <a class="ghost btn" href="/accounts/{{ a.id }}/loginlog"
+       title="没弹窗口或窗口一闪而过？点这里看脚本到底报了什么">📄 日志</a>
     {% if a.id != cur %}
     <a class="ghost btn" href="/accounts/{{ a.id }}/set_current">设为当前</a>
     {% endif %}

@@ -127,6 +127,32 @@ def accounts_login(aid):
     return redirect(url_for("accounts_page", msg="login"))
 
 
+@app.route("/accounts/<aid>/loginlog")
+def accounts_loginlog(aid):
+    """查看该账号最近一次扫码/打开的日志。
+
+    为什么要这个页面：面板用 CREATE_NEW_CONSOLE 拉起登录脚本，脚本一旦
+    出错那个窗口会一闪而过。日志落盘后用户能自己看到原因，不用猜。
+    """
+    path = os.path.join(config.STATE_DIR, f"login_{aid}.log")
+    if not os.path.exists(path):
+        return render_template(
+            "loginlog.html", aid=aid, name=(accounts.get_account(aid) or {}).get("name", aid),
+            content="（还没有日志。点「扫码登录」后这里会出现记录。）", title="登录日志")
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except Exception as e:
+        lines = [f"读取失败：{e}"]
+    return render_template(
+        "loginlog.html",
+        aid=aid,
+        name=(accounts.get_account(aid) or {}).get("name", aid),
+        content="\n".join(lines[-200:]) or "（日志为空）",
+        title="登录日志",
+    )
+
+
 @app.route("/accounts/<aid>/probe")
 def accounts_probe(aid):
     """无头实测登录态与实际视频号昵称。"""

@@ -264,3 +264,10 @@
 .ltag.ok{background:color-mix(in srgb, var(--ok) 16%, transparent);color:var(--ok)}
 .ltag.warn{background:color-mix(in srgb, var(--warn) 16%, transparent);color:var(--warn)}
 .ltag.bad{background:color-mix(in srgb, var(--bad) 16%, transparent);color:var(--bad)}
+
+/* 登录日志查看 */
+.logview{background:var(--elev);border:1px solid var(--line);border-radius:8px;
+  padding:12px 14px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;
+  line-height:1.75;white-space:pre-wrap;word-break:break-all;max-height:70vh;overflow:auto;
+  color:var(--fg);margin:0}
+.logview:empty::after{content:"（暂无内容）";color:var(--mut)}

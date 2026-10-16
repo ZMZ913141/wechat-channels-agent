@@ -38,6 +38,13 @@ def _launch(p, profile: str, channel: str | None = None):
 
     - channel：账号指定的内核（''/None=自动）。'' 表示 Playwright 内置 Chromium。
     - 返回 (context, 实际使用的内核说明)。
+
+    ⚠️ 档案目录**只能**通过 user_data_dir 参数传，不能再往 args 里塞
+    `--user-data-dir`：Playwright 内部会自己传这个命令行参数，重复指定会直接报错
+    （实测报"Pass user_data_dir parameter ... instead of specifying
+    '--user-data-dir' argument"），结果浏览器一个都起不来。
+    独立窗口由 persistent context 天然保证——它会开自己的进程，
+    不会把窗口塞进你日常已在运行的 Edge 里。
     """
     args = ["--start-maximized", "--disable-blink-features=AutomationControlled"]
     last_err = None
@@ -58,6 +65,75 @@ def _launch(p, profile: str, channel: str | None = None):
     raise last_err if last_err else RuntimeError("浏览器启动失败")
 
 
+def _install_log_capture(account_id: str):
+    """把 print 同时写到日志文件，并返回文件句柄。
+
+    为什么需要：面板用 CREATE_NEW_CONSOLE 拉起本脚本，如果脚本因为任何错误
+    提前 return，那个控制台窗口会**一闪而过**，用户根本看不到发生了什么，
+    只能看到「点了没反应」。写文件后，面板可以展示，排查不再是猜。
+    """
+    import sys
+
+    try:
+        os.makedirs(config.STATE_DIR, exist_ok=True)
+        path = os.path.join(config.STATE_DIR, f"login_{account_id}.log")
+        fh = open(path, "a", encoding="utf-8", buffering=1)
+    except Exception:
+        return None, ""
+
+    def emit(msg: str):
+        try:
+            fh.write(msg + "\n")
+            fh.flush()
+        except Exception:
+            # 文件可能已被 _finish 关闭（脚本收尾后再有输出），
+            # 此时静默忽略即可，绝不能让日志失败拖垮主流程。
+            pass
+
+    # ⚠️ 必须用 sys.__stdout__（原始 stdout），绝不能用 sys.stdout ——
+    # 后者即将被替换成 _Tee，若 _Tee 内部再写 sys.stdout 就形成无限递归，
+    # 实测会写出 25 万字符的重复日志把磁盘塞满。
+    sys.stdout = _Tee(sys.__stdout__, emit)
+    return fh, path
+
+
+class _Tee:
+    """stdout 转发器：原样输出到控制台 + 同步落盘。"""
+
+    def __init__(self, old, emit):
+        self.old, self.emit = old, emit
+
+    def write(self, s):
+        try:
+            self.old.write(s)
+        except Exception:
+            pass
+        if s and s.strip():
+            self.emit(s.rstrip())
+        return len(s)
+
+    def flush(self):
+        try:
+            self.old.flush()
+        except Exception:
+            pass
+
+    def isatty(self):
+        return False
+
+
+def _finish(fh) -> None:
+    """结束前补一行，确保日志末尾有明确结论（窗口要马上关了）。"""
+    if not fh:
+        return
+    try:
+        fh.write(f"===== {time.strftime('%Y-%m-%d %H:%M:%S')} 结束 =====\n")
+        fh.flush()
+        fh.close()
+    except Exception:
+        pass
+
+
 def open_publish_page(account: dict | None = None, open_url: str | None = None) -> None:
     """启动一个【有头】浏览器，打开指定页面，等待扫码登录成功，直到用户关闭窗口。
 
@@ -65,8 +141,8 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
     - open_url：要打开的页面；默认发表页（未登录会自动先出二维码）。
 
     ⚠️ 档案独占：一个 Chromium 档案同时只能被一个进程真正占用。本函数会先抢
-    「档案锁」；抢不到（通常是后台监控正在用）时**明确报错并退出**，
-    绝不再开一个拿不到登录态的窗口（那会让用户误以为「刚登录过却显示未登录」）。
+    「档案锁」；抢不到时**明确报错并退出**，绝不再开一个拿不到登录态的窗口
+    （那会让用户误以为「刚登录过却显示未登录」）。
     """
     acc = account or accounts.current_account()
     profile = accounts.profile_path(acc)
@@ -74,8 +150,12 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
     aid = acc["id"]
     name = acc.get("name") or aid
 
+    # 先接管输出，让所有信息都落盘（否则控制台窗口一闪而过就没了）
+    fh, log_path = _install_log_capture(aid)
+
     print(f"[INFO] 账号「{name}」({aid})")
     print(f"[INFO] 登录档案：{profile}")
+    print(f"[INFO] 日志文件：{log_path}" if log_path else "")
     print(f"[INFO] 浏览器内核偏好：{accounts.channel_label(acc)}")
 
     # owner="manual"：这次打开本身就是「手动操作」，若面板已经为该账号打了
@@ -91,8 +171,9 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
         print("[HINT]   1) 上一次打开的浏览器窗口还没关 → 直接关掉再试")
         print("[HINT]   2) 另一个账号正在发布 → 稍等它结束，或到面板看发布进度")
         print("[HINT]   3) 该账号被标记为「手动操作中」但窗口已关 → 面板点「解除暂停」")
-        print("[HINT]   4) 残留锁（进程被强杀）→ 面板点「🧹 素材库维护」旁边的清理，"
-              "或删除 state/profile_*.lock")
+        print("[HINT]   4) 残留锁（进程被强杀）→ 删掉 state/profile_*.lock 后重试")
+        _finish(fh)
+        time.sleep(6)      # 给用户看清报错再关窗
         return
 
     try:
@@ -101,7 +182,13 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
                 ctx, used = _launch(p, profile, accounts.channel_of(acc))
             except Exception as e:
                 print(f"[ERROR] 浏览器启动失败：{e}")
-                print("[HINT] 如果提示 profile 正被占用，请先关闭残留的浏览器窗口。")
+                print("[HINT] 可能原因：")
+                print("[HINT]   1) 该档案的浏览器窗口还开着 → 全部关掉再试")
+                print("[HINT]   2) 账号指定的浏览器内核没装 → 到「账号管理」改成已装的内核"
+                      "（如 msedge / chrome），或留空用内置 Chromium")
+                print("[HINT]   3) 档案目录被占用或无权限 → 关闭杀毒软件的文件占用提示后重试")
+                _finish(fh)
+                time.sleep(8)      # 让用户看清报错
                 return
             print(f"[INFO] 浏览器已启动（内核：{used}），正在打开页面：{url}")
 
@@ -117,10 +204,12 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
             # ---- 立刻回报「这个档案现在登的是哪个视频号」----
             # 这一步很关键：两个账号如果都登成了同一个视频号，面板上一眼就能看出来。
             probe = loginprobe.probe(page)
-            if probe.get("logged_in"):
-                print(f"[OK] ✅ 已登录，当前视频号：{probe.get('nickname') or '（读不到昵称）'}")
+            if probe.get("verified"):
+                print(f"[OK] ✅ 已登录，当前视频号：{probe.get('nickname')}")
+            elif probe.get("logged_in"):
+                print(f"[WARN] 已登录但昵称未读到：{probe.get('detail')}")
             else:
-                print(f"[INFO] 当前未登录（{probe.get('detail')}），请扫码。")
+                print(f"[INFO] 当前未登录（{probe.get('detail') or '请扫码'}）")
             loginprobe.write_identity(
                 aid,
                 {**probe, "browser": used, "ts": time.time(),
@@ -174,5 +263,7 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
                 pass
     finally:
         proclock.release(profile)
-        # 手动操作结束 → 立刻解除该账号的暂停标记，监控无需等到超时
+        # 手动操作结束 → 立刻解除该账号的暂停标记，后续发布无需等到超时
         proclock.resume(aid)
+        print("[INFO] 登录窗口流程结束，暂停标记已解除。")
+        _finish(fh)

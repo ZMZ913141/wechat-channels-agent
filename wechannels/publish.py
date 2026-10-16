@@ -1,13 +1,18 @@
 """同步发布：把一条素材（本地视频+文案）依次发布到多个视频号账号。
 
 流程（每个账号串行执行，互不争用登录态）：
-  1. 取该账号的浏览器档案（独立登录态），加文件锁（与私信监控互斥）
-  2. browser-use Agent 打开视频号发表页：上传视频 → 填标题/描述 → （可选）传封面 → 点发表
-  3. 记录每个账号的成功/失败结果
-  4. 全部成功 → 素材标记「已发布」；有失败 → 保持原状态并通知你补发
+  1. 取该账号的浏览器档案（独立登录态），加**账号锁 + 档案锁**双重互斥
+  2. 确定性 Playwright 操作视频号发表页：上传 → 填字段 → 发表
+     （失败时按配置回退 browser-use Agent「看懂页面」）
+  3. 记录每个账号的成功/失败结果与未生效字段
+  4. 全部成功 → 素材标记「已发布」；有失败 → 保持原状态并提示补发
 
-发布任务由 AI Agent「看懂页面」完成，比写死选择器抗改版；但不是 100% 确定
-性操作，失败结果会在面板「同步发布」页与通知中如实呈现，可对失败账号单独重发。
+## 多账号为什么不会互相冲突
+- **账号锁**（`state/task_<id>.lock`）：同一账号同一时刻只允许一个发布任务，
+  避免对同一个视频号重复提交。
+- **档案锁**（`state/profile_<hash>.lock`）：每个账号一个独立浏览器档案，
+  一个 Chromium 档案同一时刻只能被一个进程打开。两个不同账号 = 两个不同档案
+  = 天然不冲突，可以并行；同账号才会互斥。
 """
 import asyncio
 import json
@@ -17,9 +22,21 @@ import time
 
 from browser_use import Agent
 
-from . import accounts, config, materials, monitor
+from . import accounts, config, materials, proclock
 from .browser import get_browser, get_llm
-from .notify import notify
+
+# 账号级任务锁等待时长（秒）。同账号并发发布时，后到者最多等这么久；
+# 默认0 = 不等，直接明确报错让用户稍后重试（避免用户干等）。
+TASK_LOCK_WAIT_S = float(config.PUBLISH_TASK_LOCK_WAIT_S)
+
+
+def _mins_left(pause: dict) -> int:
+    """暂停窗口还剩多少分钟（至少显示 1 分钟，避免显示 0 让人困惑）。"""
+    try:
+        left = max(0, int(float(pause.get("until", 0)) - time.time()))
+        return max(1, left // 60)
+    except Exception:
+        return 1
 
 PUBLISH_TASK = """打开 {url}（视频号助手），完成一次视频发布：
 1. 进入「发表视频」入口（发布/上传视频按钮）。
@@ -225,7 +242,8 @@ def _run_job(mat: dict, accs: list, overrides: dict | None = None) -> None:
     for acc, ok, text in results:
         lines.append(f"- {acc['name']}: {'成功' if ok else '失败（' + text[:80] + '）'}")
     summary = "\n".join(lines)
-    notify("视频号同步发布", summary)
+    # 结果同时用于面板「发布中心」展示与落盘存档
+    print(f"[INFO] 同步发布汇总：\n{summary}")
 
     if ok_count == len(results) and results:
         materials.set_status(mat["id"], "已发布")
@@ -251,11 +269,31 @@ def _update_account_status(aid: str, status: str, result: str) -> None:
 def publish_one_account(acc: dict, mat: dict, overrides: dict | None = None) -> tuple[bool, str]:
     """发布单账号：先走「确定性填写」（无需 LLM），失败自动回退 browser-use Agent。
 
-    这样即使 LLM 不可用/超时也能发布，速度与稳定性都优于纯 Agent 方案。
+    两层互斥保证多账号安全：
+      - 账号锁：同一账号不允许两个发布任务并发（防重复提交到同一个视频号）
+      - 档案锁（在 publish_pw 内）：同一浏览器档案不允许两个进程同时打开
+    不同账号之间**不互斥**，可以并行发布。
     """
-    lock_path = os.path.join(config.STATE_DIR, f"monitor_{acc['id']}.lock")
-    if not monitor._acquire_lock(lock_path):
-        return False, "该账号正被监控/其它任务占用，请先停止对应任务再发布"
+    acc_id = acc["id"]
+
+    # 手动操作暂停窗口：用户正在扫码登录/手动打开发表页时，这个账号的档案
+    # 正被别人占用——此时发布只会得到「档案被占用」这种晦涩错误。
+    # 这里提前判断并说清楚原因。
+    pause = proclock.paused(acc_id)
+    if pause:
+        return False, (
+            f"账号「{acc.get('name') or acc_id}」正在手动操作中（{pause.get('reason', '被打开发表页')}），"
+            f"档案被占用，请约{_mins_left(pause)} 分钟后再发布"
+        )
+
+    got, holder = proclock.acquire_account(
+        acc_id, tag=f"发布（{acc.get('name') or acc_id}）", wait_s=TASK_LOCK_WAIT_S
+    )
+    if not got:
+        return False, (
+            f"账号「{acc.get('name') or acc_id}」正被 {proclock.holder_desc(holder)} 占用，"
+            "请等上一个任务结束（或换个账号）后重试"
+        )
     try:
         if config.PUBLISH_METHOD == "deterministic":
             try:
@@ -272,7 +310,7 @@ def publish_one_account(acc: dict, mat: dict, overrides: dict | None = None) -> 
                 return False, "确定性发布未成功，且已关闭自动回退（.env PUBLISH_AUTO_FALLBACK=false）"
         return asyncio.run(publish_to_account(acc, mat, overrides=overrides))
     finally:
-        monitor._release_lock(lock_path)
+        proclock.release_account(acc_id)
 
 
 async def publish_to_account(acc: dict, mat: dict, max_retries: int = 1, overrides: dict | None = None) -> tuple[bool, str]:

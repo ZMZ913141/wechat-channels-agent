@@ -12,7 +12,7 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-from . import accounts, config, monitor_pw, proclock
+from . import accounts, config, loginprobe, proclock
 
 # 视频号助手平台首页（未登录时会自动展示登录二维码）
 PLATFORM_URL = "https://channels.weixin.qq.com/platform"
@@ -108,12 +108,12 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
 
             # ---- 立刻回报「这个档案现在登的是哪个视频号」----
             # 这一步很关键：两个账号如果都登成了同一个视频号，面板上一眼就能看出来。
-            probe = monitor_pw._login_probe(page)
+            probe = loginprobe.probe(page)
             if probe.get("logged_in"):
                 print(f"[OK] ✅ 已登录，当前视频号：{probe.get('nickname') or '（读不到昵称）'}")
             else:
                 print(f"[INFO] 当前未登录（{probe.get('detail')}），请扫码。")
-            monitor_pw.write_identity(
+            loginprobe.write_identity(
                 aid,
                 {**probe, "browser": used, "ts": time.time(),
                  "at": time.strftime("%Y-%m-%d %H:%M:%S")},
@@ -140,8 +140,8 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
                         logged_notified = True
                         # 登录成功后重新读一次身份，写回面板
                         try:
-                            pr = monitor_pw._login_probe(page, wait_s=8)
-                            monitor_pw.write_identity(
+                            pr = loginprobe.probe(page, wait_s=8)
+                            loginprobe.write_identity(
                                 aid,
                                 {**pr, "browser": used, "ts": time.time(),
                                  "at": time.strftime("%Y-%m-%d %H:%M:%S")},

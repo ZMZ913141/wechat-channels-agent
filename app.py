@@ -31,61 +31,15 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-from wechannels import accounts, config, login_state, media_probe, materials, monitor
+from wechannels import accounts, config, loginprobe, login_state, materials, media_probe
 from wechannels import mp as mpmod
 from wechannels import proclock
 from wechannels import publish as pubmod
-from wechannels import reply as replymod
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
 
 CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
-
-# ---------------------------------------------------------------------------
-# 监控子进程管理（让 app.py 一个进程就能跑全部）
-# ---------------------------------------------------------------------------
-MONITOR_PID_FILE = os.path.join(config.STATE_DIR, "monitor.pid")
-MONITOR_LOG_FILE = os.path.join(config.STATE_DIR, "monitor.log")
-_monitor_proc = None
-_monitor_logf = None  # 保持日志文件句柄不被 GC（Windows 上必须）
-
-
-def _read_pid() -> int | None:
-    try:
-        with open(MONITOR_PID_FILE, encoding="utf-8") as f:
-            v = f.read().strip()
-        return int(v) if v else None
-    except Exception:
-        return None
-
-
-def _write_pid(pid: int) -> None:
-    os.makedirs(config.STATE_DIR, exist_ok=True)
-    with open(MONITOR_PID_FILE, "w", encoding="utf-8") as f:
-        f.write(str(pid))
-
-
-def _clear_pid() -> None:
-    try:
-        os.remove(MONITOR_PID_FILE)
-    except Exception:
-        pass
-
-
-def _monitor_running() -> bool:
-    global _monitor_proc
-    if _monitor_proc is not None and _monitor_proc.poll() is None:
-        return True
-    pid = _read_pid()
-    if pid:
-        # 注意：必须用 monitor.pid_alive —— Windows 下 os.kill(pid, 0) 会真的
-        # 把目标进程 TerminateProcess 掉（CPython 在 Windows 的实现），探活变成杀进程。
-        if monitor.pid_alive(pid):
-            return True
-        _clear_pid()
-    return False
-
 
 # ---------------------------------------------------------------------------
 # 模板（CSS 变量驱动暗/亮双主题，默认暗色“夜视版”）
@@ -204,11 +158,10 @@ TEMPLATE = """<!doctype html>
 </style></head>
 <body>
 <header>
-  <h1>视频号助手 · 管理面板 <span class="dot {status_dot}" title="监控状态"></span></h1>
+  <h1>视频号助手 · 管理面板</h1>
   <div class="nav">
     <a href="/publish">同步发布</a>
     <a href="/import">目录导入</a>
-    <a href="/reply">自动回复</a>
     <a href="/mp">公众号</a>
     <a href="/accounts">账号</a>
     <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙 夜视</button>
@@ -224,14 +177,8 @@ TEMPLATE = """<!doctype html>
     </form>
     <span class="muted">（{account_count} 个账号）</span>
     <a class="btn ghost" href="/accounts">＋ 管理/新增账号</a>
-    <a class="btn ghost" href="/open_publish?account={cur_account_id}" target="_blank" title="会先自动为该账号暂停监控（保证档案独占，否则会打开一个没登录态的窗口）">打开发表页（{cur_account_name}）</a>
-    <a class="btn ghost" href="/check_dm">立即检查私信</a>
+    <a class="btn ghost" href="/open_publish?account={cur_account_id}" target="_blank" title="为该账号打开视频号发表页，登录态独占，不会和发布任务打架">打开发表页（{cur_account_name}）</a>
   </div>
-</div>
-
-<div class="card">
-  <h2>监控运行状态</h2>
-  {monitor_card}
 </div>
 
 <div class="maingrid">
@@ -247,7 +194,7 @@ TEMPLATE = """<!doctype html>
       </h2>
       <div class="searchbar">
         <form method="get" action="/" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-          <input type="hidden" name="status" value="{status_hidden}">
+          <input type="hidden" name="status" value="{sf}">
           <input name="q" value="{q}" placeholder="🔍 搜索标题 / 文案 / 标签…">
           <select name="sort">
             <option value="new" {s_new}>最新创建</option>
@@ -277,13 +224,6 @@ TEMPLATE = """<!doctype html>
       {new_material_form}
     </div>
   </div>
-</div>
-
-<div class="card">
-  <h2>最近私信通知 <span class="sub">{notify_channel}</span></h2>
-  <div class="log">{notify_preview}</div>
-  <p style="margin:10px 0 0"><a class="btn ghost" href="/test_notify">发送测试通知</a>
-  <a class="btn ghost" href="/notifications">查看全部</a></p>
 </div>
 
 </main>
@@ -1039,88 +979,6 @@ def _account_options() -> str:
     )
 
 
-def _monitor_card_html() -> tuple:
-    """返回 (status_html, dot_class)。综合“面板托管子进程”与“心跳文件”判断。"""
-    running = _monitor_running()
-    hb = monitor.read_heartbeat()
-    now = time.time()
-    if hb:
-        ts = hb.get("ts", 0)
-        last_success = hb.get("last_success", 0)
-        alive = (now - ts) < config.SHUTDOWN_HEARTBEAT_TIMEOUT
-        success_ok = (now - last_success) < config.SHUTDOWN_SUCCESS_TIMEOUT
-    else:
-        alive = False
-        success_ok = False
-
-    if running and alive and success_ok:
-        dot, label = "ok", "运行中（面板托管）"
-    elif running and alive and not success_ok:
-        dot, label = "warn", "运行中，但还没成功检查过一次（看监控日志定位原因）"
-    elif running:
-        dot, label = "warn", "已启动，等待首次心跳…"
-    elif hb and alive:
-        dot, label = "ok", "运行中（外部 monitor_dm.py）"
-    else:
-        dot, label = "bad", "未运行"
-
-    last_check = hb.get("updated_at", "—") if hb else "—"
-    ls = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_success)) if (hb and last_success) else "—"
-    acc = (hb or {}).get("account", "—")
-
-    if running:
-        btn = '<a class="btn danger" href="/monitor/stop">■ 停止监控</a>'
-    else:
-        btn = '<a class="btn" href="/monitor/start">▶ 启动监控</a>'
-    btn += ' <a class="btn ghost" href="/monitor/log">📜 监控日志</a>'
-    btn += ' <a class="btn ghost" href="/monitor/once">⚡ 立即检查一次</a>'
-    btn += ' <a class="btn ghost" href="/cleanup_locks" title="进程被强杀后会留下 monitor_*.lock，点这里清掉，否则后续每一轮都可能被静默跳过">🧹 清理残留锁</a>'
-
-    accs = accounts.load_accounts()
-    acc_names = "、".join(
-        f"{a['name']}{'' if a.get('enabled', True) else '（未启用）'}" for a in accs
-    ) or "—"
-
-    # 「手动操作暂停」状态：面板打开发表页/扫码登录时会自动给该账号暂停，让出浏览器档案
-    pz = proclock.paused_all()
-    pz_html = ""
-    if pz:
-        items = []
-        for aid, it in pz.items():
-            a = accounts.get_account(aid) or {"name": aid}
-            left = max(0, int(float(it.get("until", 0)) - now))
-            items.append(
-                f"{a.get('name') or aid}（{it.get('reason','手动操作')}，剩约 {left // 60} 分钟）"
-            )
-        pz_html = (
-            '<div style="color:#f59e0b">⏸ <b>已为「手动操作」暂停监控</b>：'
-            + "；".join(items)
-            + '<span class="muted">（关掉浏览器窗口后自动恢复；也可在账号页点「解除暂停」）</span></div>'
-        )
-
-    html = (
-        f'<div class="stat">'
-        f'<div><span class="dot {dot}"></span><b>{label}</b></div>'
-        f'<div>最近一次检查：<b>{last_check}</b></div>'
-        f'<div>最近一次成功：<b>{ls}</b></div>'
-        f'<div>当前账号：<b>{acc}</b></div>'
-        f'<div>监控范围：<b>{acc_names}</b><span class="muted">（勾了「监控」的账号全部监控，不只当前账号）</span></div>'
-        f'{pz_html}'
-        f'<div>{btn}</div>'
-        f'</div>'
-    )
-    # 心跳新鲜度超过一轮（间隔 + 2 分钟）才认为「外部进程还活着」，
-    # 否则进程被强杀后 10 分钟内都会误报「仍有独立终端在运行」。
-    hb_alive = bool(hb) and (now - float(hb.get("ts", 0))) < (config.MONITOR_INTERVAL + 120)
-    if (not running) and hb_alive:
-        html += (
-            '<p class="muted">检测到由独立终端启动的 monitor_dm.py 仍在运行'
-            f'（心跳 {last_check}）；用面板「启动监控」会另起一个进程，'
-            '请先在该终端 Ctrl+C 停止。</p>'
-        )
-    return html, dot
-
-
 def _thumb_html(cover: str, video: str) -> str:
     if cover:
         ap = cover if os.path.isabs(cover) else os.path.join(BASE, cover)
@@ -1153,9 +1011,9 @@ def _login_badge(aid: str) -> str:
     txt = "已登录" if (st["logged_in"] and st["fresh"]) else ("可能失效" if st["logged_in"] else "未登录")
     out = f'<span class="dot {cls}" title="{st["detail"]}"></span><span class="muted" style="font-size:11px">{txt}</span>'
     try:
-        from wechannels import monitor_pw
+        from wechannels import loginprobe
 
-        ident = monitor_pw.read_identity(aid)
+        ident = loginprobe.read_identity(aid)
     except Exception:
         ident = {}
     if ident:
@@ -1257,41 +1115,6 @@ def _materials_grid(status_filter: str | None, q: str = "", sort: str = "new") -
     return '<div class="grid-mat">' + "".join(_material_card_html(m) for m in items) + "</div>"
 
 
-def _notify_preview(n: int = 20) -> str:
-    try:
-        with open(config.NOTIFY_LOG, encoding="utf-8") as f:
-            lines = f.read().splitlines()
-    except Exception:
-        return "（暂无通知记录）"
-    return "\n".join(reversed(lines[-n:])) or "（暂无通知记录）"
-
-
-def _notify_channel_html() -> str:
-    """首页显示通知渠道自检结果：配了渠道但没填 key 时明确告警。"""
-    from wechannels.notify import channel_status
-
-    st = channel_status()
-    if st["ok"]:
-        return f'推送渠道：{st["label"]} ✅'
-    return (
-        f'<span style="color:#ef4444">推送渠道：{st["label"]} ⚠️ {st["tip"]}</span>'
-        '<span class="muted">（通知仍会写入 state/notifications.log，不会丢，但手机上收不到）</span>'
-    )
-
-
-def _notify_kwargs_for_current() -> dict:
-    acc = accounts.current_account()
-    n = acc.get("notify") or {}
-    out = {}
-    for k in (
-        "channel", "webhook", "webhook_type", "serverchan_sendkey", "pushplus_token",
-        "wecom_corpid", "wecom_secret", "wecom_agentid", "wecom_touser",
-    ):
-        if k in n and n[k]:
-            out[k] = n[k]
-    return out
-
-
 def _spawn_open_publish(account_id: str, login: bool = False) -> None:
     """拉起 open_publish.py 子进程（新控制台窗口，方便看扫码提示）。
 
@@ -1318,7 +1141,6 @@ def index():
     sf = request.args.get("status")
     q = request.args.get("q", "")
     sort = request.args.get("sort", "new")
-    status_html, status_dot = _monitor_card_html()
     html = TEMPLATE
     html = html.replace("{account_options}", _account_options())
     html = html.replace("{account_count}", str(len(accounts.load_accounts())))
@@ -1328,13 +1150,9 @@ def index():
     html = html.replace("{cur_account_name}", _cur_acc_name)
     html = html.replace("{count}", str(len(materials.load_materials(accounts.current_account_id()))))
     html = html.replace("{materials_grid}", _materials_grid(sf, q, sort))
-    html = html.replace("{notify_preview}", _notify_preview())
-    html = html.replace("{notify_channel}", _notify_channel_html())
-    html = html.replace("{monitor_card}", status_html)
-    html = html.replace("{status_dot}", status_dot)
     html = html.replace("{new_material_form}", NEW_FORM)
-    html = html.replace("{status_hidden}", sf or "")
     html = html.replace("{q}", q)
+    html = html.replace("{sf}", sf or "")
     html = html.replace("{s_new}", "selected" if sort == "new" else "")
     html = html.replace("{s_updated}", "selected" if sort == "updated" else "")
     html = html.replace("{s_status}", "selected" if sort == "status" else "")
@@ -1692,263 +1510,12 @@ def open_publish():
     return redirect(url_for("index"))
 
 
-@app.route("/check_dm")
-def check_dm():
-    acc = accounts.current_account()
-
-    def _run():
-        import asyncio
-
-        asyncio.run(monitor.run_once(acc))
-
-    threading.Thread(target=_run, daemon=True).start()
-    return redirect(url_for("index"))
-
-
 # 各通知渠道的配置步骤（未配置时显示在测试通知结果页）
-_NOTIFY_GUIDE = {
-    "webhook": (
-        "<b>企业微信「消息推送」（原「群机器人」）</b><br>"
-        "<span style='color:#22c55e'>✅ 先看这条：企业微信 <b>v4.1.41 起已把「群机器人」改名为"
-        "「消息推送」</b>。在群聊面板里<b>往上找「消息推送」这一项</b>，就是它，不是消失。</span><br>"
-        "1. <b>电脑端</b>：进内部群 → 右上角「…」→ <b>消息推送 → 添加</b> → 新建 → "
-        "设置名称/头像 → 复制 <b>Webhook 地址</b><br>"
-        "&nbsp;&nbsp;&nbsp;<b>手机端</b>：进群 → 右上角「…」→ 消息推送 → 添加<br>"
-        "2. 填进 .env：<code>NOTIFY_CHANNEL=webhook</code>、"
-        "<code>NOTIFY_WEBHOOK=你复制的地址</code>、<code>NOTIFY_WEBHOOK_TYPE=wecom</code><br>"
-        "3. <b>重启面板</b>再测<br>"
-        "<span style='color:#f59e0b'>⚠️ 确实没有「消息推送」这一项，按顺序排查：<br>"
-        "① 群是<b>外部群</b>（含微信/外部联系人）→ 外部群不支持，必须新建纯内部群；<br>"
-        "② 群开了「<b>仅群主管理</b>」→ 只有群主能看到入口，找群主；<br>"
-        "③ 管理员在「管理后台 → 应用管理 → 消息推送」里限制了<b>可创建成员</b>"
-        "（白名单），或直接停用了该应用 → 找企业管理员开通；<br>"
-        "④ 企业<b>未完成认证/验证</b>，或客户端版本过低 → 找管理员认证 / 升级客户端。</span><br>"
-        "<span style='color:#3b82f6'>💡 以上都嫌麻烦就别折腾企业微信了——直接用下面的"
-        "「PushPlus」（2 分钟，扫码即用），或者「应用消息」（不受群类型和上述任何限制）。</span>"
-    ),
-    "wecom_app": (
-        "<b>企业微信「应用消息」——官方直推，可转发到个人微信</b><br>"
-        "1. 登录企业微信管理后台 →「我的企业」页最下方复制 <b>企业ID</b>（corpid）<br>"
-        "2.「应用管理 → 自建 → 创建应用」，进入后拿 <b>AgentId</b> 和 <b>Secret</b><br>"
-        "3. 填进 .env：WECOM_CORPID / WECOM_SECRET / WECOM_AGENTID，并把 NOTIFY_CHANNEL 改成 wecom_app<br>"
-        "4.（可选）在该应用里开启「微信插件」，消息就能同时到你的个人微信<br>"
-        "5. <b>重启面板</b>再测"
-    ),
-    "serverchan": (
-        "<b>Server酱——推到个人微信（不想折腾企业微信就走这条）</b><br>"
-        "1. 打开 https://sct.ftqq.com 微信扫码登录<br>"
-        "2. 复制 SendKey，填进 .env 的 <code>SERVERCHAN_SENDKEY=</code><br>"
-        "3. <b>重启面板</b>再测<br>"
-        "注：免费版有每日条数限制，私信量大建议改用 PushPlus"
-    ),
-    "pushplus": (
-        "<b>PushPlus——推到个人微信</b><br>"
-        "1. 打开 https://www.pushplus.plus 微信扫码登录<br>"
-        "2. 复制 token，填进 .env 的 <code>PUSHPLUS_TOKEN=</code>，并把 NOTIFY_CHANNEL 改成 pushplus<br>"
-        "3. <b>重启面板</b>再测"
-    ),
-}
-
-_NOTIFY_GUIDE_MP = (
-    "<b>关于公众号</b>：公众号是「给粉丝发内容」的通道，不适合做「给自己发告警」——"
-    "模板消息要求服务号 + 你的 openid + 模板 ID。<br>"
-    "本项目里公众号的用途是：面板「公众号」页绑定后可直接在面板发图文草稿"
-    "（你目前<b>还没绑定</b>，绑定后这个能力就能用）。"
-)
-
-
-@app.route("/test_notify")
-def test_notify():
-    from wechannels.notify import channel_status, notify
-
-    st = channel_status()
-    notify(
-        "测试通知",
-        "如果你在微信收到这条，说明推送配置正确 ✅（当前账号：「" + accounts.current_account()["name"] + "」）",
-        **_notify_kwargs_for_current(),
-    )
-    if st["ok"]:
-        hint = {
-            "webhook": "没收到时常见原因：Webhook 地址复制不全、该「消息推送」已被移出群、网络不通。",
-            "wecom_app": "没收到时常见原因：AgentId/Secret 填错、接收人不在应用可见范围内、网络不通。",
-            "serverchan": "没收到时常见原因：SendKey 填错、没关注 Server酱的服务号、网络不通。",
-            "pushplus": "没收到时常见原因：token 填错、没在 PushPlus 关注/关注了但未绑定、网络不通。",
-        }.get(st["channel"], "没收到时常见原因：参数填错、网络不通。")
-        how = f'已通过「{st["label"]}」发出一条测试通知，请查看手机/群是否收到。{hint}'
-    else:
-        how = (
-            f'⚠️ {st["tip"]} —— 这条测试通知<b>只会写进本地日志</b>，手机上收不到。'
-            "请按下面步骤补全配置后<b>重启面板</b>再测。"
-        )
-    # 列出全部渠道的配置步骤：当前渠道置顶，其余作为可替换方案
-    from wechannels.notify import CHANNEL_LABEL
-
-    order = ([st["channel"]] if st["channel"] in _NOTIFY_GUIDE else []) + [
-        k for k in _NOTIFY_GUIDE if k != st["channel"]
-    ]
-    parts = []
-    for k in order:
-        tag = "当前渠道" if k == st["channel"] else "可换用"
-        color = "#3b82f6" if k == st["channel"] else "#9aa3b2"
-        parts.append(
-            '<div style="border-top:1px solid #262b36;padding-top:12px;margin-top:12px">'
-            f'<p style="margin:0 0 6px;color:{color}">【{tag}】{CHANNEL_LABEL.get(k, k)}</p>'
-            f'<p style="margin:0">{_NOTIFY_GUIDE[k]}</p></div>'
-        )
-    guide = "".join(parts)
-    return render_template_string(
-        '<!doctype html><meta charset="utf-8">'
-        '<body style="background:#0f1115;color:#e6e9ef;font:15px system-ui;padding:28px;max-width:820px;line-height:1.7">'
-        '<h2 style="margin-top:0">测试通知已触发</h2>'
-        '<div style="background:#181b22;border:1px solid #262b36;border-radius:12px;padding:16px">'
-        '<p style="margin:0 0 8px">当前渠道：<b>{{ch}}</b></p>'
-        '<p style="margin:0;color:#9aa3b2">{{how|safe}}</p></div>'
-        '{% if guide %}'
-        '<div style="background:#181b22;border:1px solid #262b36;border-radius:12px;padding:16px;margin-top:14px">'
-        '<p style="margin:0 0 6px"><b>怎么选（按省事程度）</b></p>'
-        '<p style="margin:0;color:#9aa3b2">'
-        '<b style="color:#e6e9ef">① 只想最快收到 → PushPlus</b>：微信扫码拿 token 填一行，2 分钟，'
-        '不用建群、不用认证、不受企业微信任何限制。<br>'
-        '<b style="color:#e6e9ef">② 想用企业微信 → 先在群里找「消息推送」</b>：'
-        '它已不叫「群机器人」（v4.1.41 起改名），就在群聊面板里。<br>'
-        '<b style="color:#e6e9ef">③ 群入口被限制 / 企业未认证 → 用「应用消息」</b>：'
-        '走管理后台自建应用，不受群类型、群管理权限、认证状态影响，最稳。'
-        '</p></div>'
-        '<div style="background:#181b22;border:1px solid #262b36;border-radius:12px;padding:16px;margin-top:14px">'
-        '<p style="margin:0 0 4px"><b>各渠道配置步骤</b></p>{{guide|safe}}</div>'
-        '{% endif %}'
-        '<div style="background:#181b22;border:1px solid #262b36;border-radius:12px;padding:16px;margin-top:14px">'
-        '<p style="margin:0;color:#9aa3b2">{{mp|safe}}</p></div>'
-        '<p style="margin-top:18px"><a href="/notifications" style="color:#3b82f6">查看本地通知日志</a>'
-        ' · <a href="/" style="color:#3b82f6">返回面板</a></p></body>',
-        ch=st["label"], how=how, guide=guide, mp=_NOTIFY_GUIDE_MP,
-    )
-
-
-@app.route("/notifications")
-def notifications():
-    try:
-        with open(config.NOTIFY_LOG, encoding="utf-8") as f:
-            content = f.read() or "（暂无通知记录）"
-    except Exception:
-        content = "（暂无通知记录）"
-    return render_template_string(
-        '<!doctype html><meta charset="utf-8"><body style="background:#0f1115;color:#9aa3b2;font:13px ui-monospace;padding:24px">'
-        '<a href="/" style="color:#3b82f6">返回</a><pre style="white-space:pre-wrap">{{c}}</pre></body>',
-        c=content,
-    )
 
 
 # ---------------------------------------------------------------------------
 # 监控启停（聚合到面板）
 # ---------------------------------------------------------------------------
-@app.route("/monitor/start")
-def monitor_start():
-    global _monitor_proc, _monitor_logf
-    if _monitor_running():
-        return redirect(url_for("index"))
-    os.makedirs(config.STATE_DIR, exist_ok=True)
-    # 监控子进程的输出以前是「黑洞」（继承面板 stdout，面板重启就丢），
-    # 出问题时完全看不到原因。现在统一落到 state/monitor.log，面板可查看。
-    try:
-        _monitor_logf = open(MONITOR_LOG_FILE, "a", encoding="utf-8", buffering=1)
-        _monitor_logf.write(
-            f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} 面板启动监控 =====\n"
-        )
-        _monitor_logf.flush()
-        out = _monitor_logf
-    except Exception:
-        out = None
-    _monitor_proc = subprocess.Popen(
-        [sys.executable, os.path.join(BASE, "monitor_dm.py")],
-        cwd=BASE,
-        env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"},
-        stdout=out,
-        stderr=subprocess.STDOUT if out else None,
-    )
-    _write_pid(_monitor_proc.pid)
-    return redirect(url_for("index"))
-
-
-@app.route("/monitor/once")
-def monitor_once():
-    """立刻跑一轮（所有启用账号），结果写进监控日志，不用等 MONITOR_INTERVAL。
-
-    用途：发完评论/私信后马上验证「能不能抓到、会不会回复」。
-    注意：若监控正在轮询同一账号，锁会让这一轮跳过并在日志里写明原因。
-    """
-    os.makedirs(config.STATE_DIR, exist_ok=True)
-    try:
-        logf = open(MONITOR_LOG_FILE, "a", encoding="utf-8", buffering=1)
-        logf.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} 手动「立即检查一次」 =====\n")
-        logf.flush()
-    except Exception:
-        logf = None
-    subprocess.Popen(
-        [sys.executable, os.path.join(BASE, "monitor_dm.py"), "--once"],
-        cwd=BASE,
-        env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"},
-        stdout=logf,
-        stderr=subprocess.STDOUT if logf else None,
-    )
-    return redirect(url_for("monitor_log"))
-
-
-@app.route("/monitor/log")
-def monitor_log():
-    """查看监控运行日志（最近 400 行）——排查「为什么不回复/不通知」直接看这里。"""
-    try:
-        with open(MONITOR_LOG_FILE, encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-        tail = "".join(lines[-400:]) or "（日志为空）"
-    except FileNotFoundError:
-        tail = "（还没有监控日志：请先在面板点「▶ 启动监控」）"
-    except Exception as e:
-        tail = f"（读取日志失败：{e}）"
-    return render_template_string(
-        '<!doctype html><meta charset="utf-8"><title>监控日志</title>'
-        '<body style="background:#0f1115;color:#e6e9ef;font:14px system-ui;padding:24px">'
-        '<h2 style="margin-top:0">监控运行日志</h2>'
-        '<p><a href="/" style="color:#3b82f6">返回面板</a> · '
-        '<a href="/monitor/log" style="color:#3b82f6">刷新</a> · '
-        '<a href="/monitor/start" style="color:#3b82f6">启动监控</a> · '
-        '<a href="/monitor/stop" style="color:#ef4444">停止监控</a>'
-        '<span style="color:#9aa3b2">　（最近 400 行，倒序最新在底部）</span></p>'
-        '<pre style="background:#181b22;border:1px solid #262b36;border-radius:12px;'
-        'padding:14px;white-space:pre-wrap;word-break:break-all;line-height:1.6">{{log}}</pre>'
-        '</body>',
-        log=tail,
-    )
-
-
-@app.route("/cleanup_locks")
-def cleanup_locks():
-    """清掉「持有进程已死」的残留锁（被强杀后最常见的隐形故障源）。"""
-    cleaned = monitor.clear_stale_locks()
-    print(f"[INFO] 清理残留锁：{cleaned or '无'}")
-    return redirect(url_for("index"))
-
-
-@app.route("/monitor/stop")
-def monitor_stop():
-    global _monitor_proc
-    if _monitor_proc is not None and _monitor_proc.poll() is None:
-        try:
-            _monitor_proc.terminate()
-        except Exception:
-            pass
-        try:
-            _monitor_proc.kill()
-        except Exception:
-            pass
-    pid = _read_pid()
-    if pid:
-        try:
-            os.kill(pid, signal.SIGTERM if os.name != "nt" else 0)
-        except Exception:
-            pass
-    _clear_pid()
-    return redirect(url_for("index"))
 
 
 # ---------------------------------------------------------------------------
@@ -2052,31 +1619,31 @@ def accounts_login(aid):
     if not accounts.get_account(aid):
         return redirect(url_for("accounts_page"))
     # 扫码登录需要独占该账号的浏览器档案：
-    #  1) 停掉面板托管的监控；
-    #  2) 给该账号打「手动操作暂停」标记 —— 即使监控是以独立终端启动的，
-    #     它下一轮也会跳过这个账号，把档案让出来（避免「刚登录过却显示未登录」）。
-    monitor_paused = False
-    if _monitor_running():
-        monitor_stop()
-        monitor_paused = True
+    # 给该账号打「手动操作暂停」标记，正在进行的发布任务会看到标记并避开它。
+    # （发布侧 acquire_account 会检查暂停窗口，见 proclock）
     proclock.pause(aid, reason="扫码登录")
     _spawn_open_publish(aid, login=True)
-    return redirect(url_for("accounts_page", msg="login" + ("_paused" if monitor_paused else "")))
+    return redirect(url_for("accounts_page", msg="login"))
 
 
 @app.route("/accounts/<aid>/probe")
 def accounts_probe(aid):
-    """真实打开该账号档案，判定登录态并读取「实际登录的视频号昵称」写回面板。"""
-    if not accounts.get_account(aid):
+    """无头实测该账号档案的登录态，并读取「实际登录的视频号昵称」写回面板。
+
+    多账号的头号事故是两个账号登成了同一个视频号，这一步就是用来一眼看出这点的。
+    """
+    acc = accounts.get_account(aid)
+    if not acc:
         return redirect(url_for("accounts_page"))
-    proclock.pause(aid, seconds=600, reason="登录态探测")
-    subprocess.Popen(
-        [sys.executable, os.path.join(BASE, "tools", "probe_login.py"), aid],
-        cwd=BASE,
-        env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"},
-        creationflags=CREATE_NEW_CONSOLE,
-    )
-    return redirect(url_for("accounts_page", msg="probe"))
+    try:
+        res = loginprobe.probe_account(acc)
+    except Exception as e:
+        return redirect(url_for("accounts_page", msg="err:" + str(e)[:60]))
+    tip = {
+        "ok": "已登录：" + (res.get("nickname") or "（读不到昵称）"),
+        "bad": "未登录，请扫码",
+    }.get("ok" if res.get("logged_in") else "bad", res.get("detail", ""))
+    return redirect(url_for("accounts_page", msg="probe:" + tip))
 
 
 @app.route("/accounts/<aid>/resume")
@@ -2340,100 +1907,6 @@ def publish_start():
 # ----------------------------------------------------------------------------
 # 固定规则自动回复
 # ----------------------------------------------------------------------------
-def _reply_row_html(r: dict) -> str:
-    scope = replymod._norm_scope(r.get("scope", "both"))
-    scope_opts = "".join(
-        f'<option value="{v}"{" selected" if v == scope else ""}>{replymod.SCOPE_LABEL[v]}</option>'
-        for v in ("dm", "comment", "both")
-    )
-    enabled = r.get("enabled", True)
-    return REPLY_ROW.format(
-        id=r["id"],
-        keyword=html.escape(r.get("keyword", ""), quote=True),
-        reply=html.escape(r.get("reply", ""), quote=True),
-        scope_opts=scope_opts,
-        state="启用中" if enabled else "已停用",
-        cls="on" if enabled else "off",
-        toggle="停用" if enabled else "启用",
-    )
-
-
-@app.route("/reply")
-def reply_page():
-    rules = replymod.load_rules()
-    rows = "".join(_reply_row_html(r) for r in rules) or '<tr><td colspan="5" class="muted">还没有规则。</td></tr>'
-    dm_ok = replymod.has_default("dm")
-    cm_ok = replymod.has_default("comment")
-    if dm_ok and cm_ok:
-        default_note = ('<div class="note ok">✅ 已配置「私信」「评论」默认回复：'
-                        '任何私信、任何评论都会自动收到一条回复。</div>')
-    else:
-        miss = [n for n, ok in (("私信", dm_ok), ("评论", cm_ok)) if not ok]
-        default_note = ('<div class="note warn">⚠️ 还缺「' + "、".join(miss) +
-                        '」的默认回复（关键词填 <b>*</b> 的规则）：未命中具体关键词的消息不会被回复。'
-                        '点下方「一键导入推荐规则」即可补齐。</div>')
-    return REPLY_TPL.format(
-        rows=rows, count=len(rules),
-        preset_count=len(replymod.PRESET_RULES),
-        default_note=default_note,
-        enabled="开" if config.AUTO_REPLY_ENABLED else "关（在 .env 设 AUTO_REPLY_ENABLED=true 开启）",
-        comment_enabled="开" if config.AUTO_REPLY_COMMENTS else "关",
-        suffix=html.escape(replymod.get_suffix(), quote=True),
-        suffix_checked="checked" if replymod.suffix_enabled() else "",
-    )
-
-
-@app.route("/reply/suffix", methods=["POST"])
-def reply_suffix():
-    sfx = request.form.get("suffix", "")
-    enabled = request.form.get("enabled") == "1"
-    replymod.set_suffix(sfx, enabled)
-    return redirect(url_for("reply_page"))
-
-
-@app.route("/reply/refresh", methods=["POST"])
-def reply_refresh():
-    replymod.refresh_presets()
-    return redirect(url_for("reply_page"))
-
-
-@app.route("/reply/new", methods=["POST"])
-def reply_new():
-    kw = request.form.get("keyword", "").strip()
-    rp = request.form.get("reply", "").strip()
-    scope = request.form.get("scope", "both")
-    if rp:
-        replymod.add_rule(kw, rp, scope=scope)
-    return redirect(url_for("reply_page"))
-
-
-@app.route("/reply/seed", methods=["POST"])
-def reply_seed():
-    replymod.seed_rules()
-    return redirect(url_for("reply_page"))
-
-
-@app.route("/reply/<rid>/update", methods=["POST"])
-def reply_update(rid):
-    replymod.update_rule(
-        rid,
-        keyword=request.form.get("keyword"),
-        reply=request.form.get("reply"),
-        scope=request.form.get("scope"),
-    )
-    return redirect(url_for("reply_page"))
-
-
-@app.route("/reply/<rid>/toggle")
-def reply_toggle(rid):
-    replymod.toggle_rule(rid)
-    return redirect(url_for("reply_page"))
-
-
-@app.route("/reply/<rid>/delete")
-def reply_delete(rid):
-    replymod.delete_rule(rid)
-    return redirect(url_for("reply_page"))
 
 
 # ----------------------------------------------------------------------------

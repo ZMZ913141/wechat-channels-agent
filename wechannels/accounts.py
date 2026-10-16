@@ -6,9 +6,7 @@
     "id": "default",            # 唯一标识
     "name": "默认视频号",        # 展示名（备注）
     "profile_dir": "profiles/default",  # 浏览器登录态目录（相对项目根或绝对）
-    "enabled": true,             # 是否纳入监控
-    "notify": null               # 可选：覆盖全局通知配置，如
-                                 # {"channel":"serverchan","serverchan_sendkey":"xxx"}
+    "enabled": true              # 是否启用（停用的账号不会出现在发布选项里）
   }
 ]
 
@@ -90,7 +88,6 @@ def _default_account() -> dict:
         "name": "默认视频号",
         "profile_dir": prof,
         "enabled": True,
-        "notify": None,
     }
 
 
@@ -105,7 +102,6 @@ def _normalize_account(a: dict) -> dict:
     if ((a.get("channel") or "").strip().lower()) not in VALID_CHANNELS:
         a["channel"] = ""
     a.setdefault("enabled", True)
-    a.setdefault("notify", None)
     return a
 
 
@@ -198,7 +194,6 @@ def add_account(data: dict) -> dict:
         "profile_dir": data.get("profile_dir") or f"profiles/{aid}",
         "channel": data.get("channel") or "",
         "enabled": data.get("enabled", True),
-        "notify": data.get("notify") or None,
     })
     accs.append(acc)
     save_accounts(accs)
@@ -212,8 +207,6 @@ def update_account(aid: str, data: dict) -> dict | None:
             for k in ("name", "profile_dir", "channel", "enabled"):
                 if k in data:
                     a[k] = data[k]
-            if "notify" in data:
-                a["notify"] = data.get("notify") or None
             _normalize_account(a)
             save_accounts(accs)
             return a

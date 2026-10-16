@@ -33,34 +33,88 @@ def _is_logged_in_url(url: str) -> bool:
     return True
 
 
-def _launch(p, profile: str, channel: str | None = None):
-    """启动有头浏览器（持久化档案）。按账号偏好选内核，失败自动回退。
+# 档案 → 实际可用的内核（实测记忆，避免每次都先失败再回退）
+# 背景：账号档案是用某个浏览器建的，用另一个内核打开会因格式差异直接退出
+# （实测 exitCode=21 + crashpad "Settings version is not 1"）。
+# 不缓存的话每次启动都要先失败一次、白等 2-4 秒。
+_WORKING_KERNEL_FILE = "working_kernels.json"
+
+
+def _kernels_path() -> str:
+    return os.path.join(config.STATE_DIR, _WORKING_KERNEL_FILE)
+
+
+def _load_working_kernel(profile: str):
+    try:
+        import json
+        with open(_kernels_path(), encoding="utf-8") as f:
+            return (json.load(f) or {}).get(os.path.abspath(profile).lower())
+    except Exception:
+        return None
+
+
+def _save_working_kernel(profile: str, channel: str) -> None:
+    try:
+        import json
+        p = _kernels_path()
+        os.makedirs(config.STATE_DIR, exist_ok=True)
+        try:
+            with open(p, encoding="utf-8") as f:
+                d = json.load(f) or {}
+        except Exception:
+            d = {}
+        d[os.path.abspath(profile).lower()] = channel
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _launch(p, profile: str, channel: str | None = None, headless: bool = False):
+    """启动浏览器（持久化档案）。按账号偏好选内核，失败自动回退。
 
     - channel：账号指定的内核（''/None=自动）。'' 表示 Playwright 内置 Chromium。
+    - headless：无头模式（后台跑，不弹窗口）。发布时可开，扫码登录必须为有头。
     - 返回 (context, 实际使用的内核说明)。
 
-    ⚠️ 档案目录**只能**通过 user_data_dir 参数传，不能再往 args 里塞
+    ⚠️ 档案目录**只能**通过 user_data_dir 参数传，不能往 args 里塞
     `--user-data-dir`：Playwright 内部会自己传这个命令行参数，重复指定会直接报错
-    （实测报"Pass user_data_dir parameter ... instead of specifying
+    （实测报 "Pass user_data_dir parameter ... instead of specifying
     '--user-data-dir' argument"），结果浏览器一个都起不来。
     独立窗口由 persistent context 天然保证——它会开自己的进程，
-    不会把窗口塞进你日常已在运行的 Edge 里。
+    不会把窗口塞进你日常已在运行的浏览器里。
+
+    ⚠️ 内核回退的必要性：账号档案可能是被 Edge 建的，而同一档案用内置
+    Chromium 打开会因格式差异直接退出（实测 exitCode=21 + crashpad
+    "Settings version is not 1"）。所以**必须按账号偏好顺序逐个回退**，
+    不能只试一个就报错。
     """
     args = ["--start-maximized", "--disable-blink-features=AutomationControlled"]
+    if headless:
+        args.append("--disable-gpu")
     last_err = None
-    for ch in accounts.channel_candidates(channel):
+    # 账号偏好优先；把「上次实测能用的内核」提到最前，避免每次重复试错
+    cands = accounts.channel_candidates(channel)
+    wk = _load_working_kernel(profile)
+    if wk is not None and wk in cands and cands.index(wk) > 0:
+        cands = [wk] + [c for c in cands if c != wk]
+
+    for ch in cands:
         try:
             kw = dict(
                 user_data_dir=profile,
-                headless=False,
-                no_viewport=True,
+                headless=headless,
                 args=args,
             )
+            if not headless:
+                # 有头时用 no_viewport 才能真正最大化；无头时 viewport 反而更稳
+                kw["no_viewport"] = True
             if ch:
                 kw["channel"] = ch
             ctx = p.chromium.launch_persistent_context(**kw)
+            _save_working_kernel(profile, ch)
             return ctx, (ch or "chromium(内置)")
-        except Exception as e:  # 本机没装该浏览器等情况 → 尝试下一个
+        except Exception as e:  # 本机没装该浏览器 / 档案格式不兼容 → 试下一个
             last_err = e
     raise last_err if last_err else RuntimeError("浏览器启动失败")
 

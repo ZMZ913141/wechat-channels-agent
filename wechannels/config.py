@@ -50,8 +50,11 @@ PUBLISH_URL = _get("PUBLISH_URL", "https://channels.weixin.qq.com/platform/post/
 STATE_DIR = os.path.abspath(_get("STATE_DIR", os.path.join(_BASE, "state")))
 
 # 同步发布
-# 发布过程默认【有头】运行，方便你肉眼确认上传与发表；稳定后可设 true 后台跑
-PUBLISH_HEADLESS = _get("PUBLISH_HEADLESS", "false").lower() == "true"
+# 同步发布是否**无头**运行（不弹浏览器窗口）。
+# 默认 true：发布是自动流程，没必要打断你；也避免多账号串行时反复弹窗。
+# ⚠️ 首次扫码登录 / 需要肉眼确认上传过程时才设 false —— 那时用面板的
+# 「扫码登录 / 打开发表页」按钮（有头），与此开关无关。
+PUBLISH_HEADLESS = _get("PUBLISH_HEADLESS", "true").lower() == "true"
 # 发布方式：
 #   deterministic = 确定性填写（Playwright 直填表单，无需 LLM，快且稳；推荐）
 #   agent         = browser-use Agent「看懂页面」操作（抗大幅改版，但依赖 LLM）

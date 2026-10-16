@@ -448,7 +448,8 @@ def publish_deterministic(acc: dict, mat: dict, overrides: dict | None = None) -
         )
     with sync_playwright() as p:
         try:
-            ctx, _ = _launch_ctx(p, profile, accounts.channel_of(acc))
+            ctx, _ = _launch_ctx(p, profile, accounts.channel_of(acc),
+                                headless=bool(config.PUBLISH_HEADLESS))
         except Exception as e:
             proclock.release(profile)
             return False, f"浏览器启动失败（档案可能被其它进程占用）：{e}"

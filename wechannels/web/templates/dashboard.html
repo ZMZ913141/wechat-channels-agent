@@ -13,7 +13,10 @@
       <select name="account" onchange="this.form.submit()">
         <option value="">全部账号</option>
         {% for a in accounts %}
-        <option value="{{ a.id }}"{{ ' selected' if account_id == a.id else '' }}>{{ a.name or a.id }}</option>
+        {% set dp = acc_display(a) %}
+        <option value="{{ a.id }}"{{ ' selected' if account_id == a.id else '' }}>
+          {{- dp.primary }}{% if dp.primary != a.name %}（{{ a.name }}）{% endif -%}
+        </option>
         {% endfor %}
       </select>
       <a class="btn ghost" href="/dashboard/export.csv?days={{ days }}&account={{ account_id }}">⬇ 导出 CSV</a>
@@ -24,6 +27,9 @@
     <b>不代表平台侧审核通过</b>。成功率分母 = 成功 + 失败，<b>排除</b>「未确认」与「已跳过」。
     视频号没有公开的数据接口，因此本页展示的是<b>发布侧数据</b>（不含播放量/点赞）。
   </p>
+  {% if identity_warning %}
+  <p class="warnbox">⚠ {{ identity_warning }}</p>
+  {% endif %}
 </div>
 
 {% if not d.has_data %}
@@ -52,14 +58,27 @@
 
 <!-- ② 账号维度 -->
 <div class="card">
-  <h3>账号维度 <span class="sub">颜色是账号的固定标识，不随数据变化</span></h3>
+  <h3>账号维度
+    <span class="sub">名字 = <b>实测登录的视频号昵称</b>（非你自己起的标签）· 颜色为账号固定标识</span>
+  </h3>
   <div class="acctstats">
     {% for a in d.accounts %}
-    <div class="astat" style="border-left:4px solid {{ a.color }}">
+    <div class="astat t-{{ a.tone }}" style="border-left:4px solid {{ a.color }}">
       <div class="ahead">
         <span class="adot" style="background:{{ a.color }}"></span>
-        <a href="/dashboard?days={{ days }}&account={{ a.account_id }}" class="aname">{{ a.name }}</a>
+        <a href="/dashboard?days={{ days }}&account={{ a.account_id }}" class="aname"
+           title="点击只看该账号的数据">{{ a.name }}</a>
+        {% if a.verified %}
+        <span class="averify ok" title="已实测确认登录身份">✓ 已确认</span>
+        {% elif a.tone == 'bad' %}
+        <span class="averify bad" title="该档案未真正登录，发布大概率会失败">✗ 未登录</span>
+        {% else %}
+        <span class="averify warn">⚠ 未检测</span>
+        {% endif %}
       </div>
+      {% if a.label != a.name %}
+      <div class="alabel">你的命名：{{ a.label }}</div>
+      {% endif %}
       <div class="ametrics">
         <div><b>{{ a.total }}</b><span>条</span></div>
         <div class="{{ 'ok' if a.success_rate >= 90 else ('warn' if a.success_rate >= 70 else 'bad') }}">
@@ -68,7 +87,7 @@
         <div><b>{{ a.share }}%</b><span>贡献率</span></div>
       </div>
       {% if a.last_failed %}
-      <div class="anote bad">最近失败 {{ a.last_failed[:16] }} · {{ a.failed }} 次</div>
+      <div class="anote bad">最近失败 {{ a.last_failed[:16] }} ·共 {{ a.failed }} 次</div>
       {% elif a.last_ok %}
       <div class="anote ok">最近成功 {{ a.last_ok[:16] }}</div>
       {% else %}
@@ -121,7 +140,11 @@
       {% for r in d.rows %}
         <tr>
           <td class="nw">{{ r.requested_at[5:16] }}</td>
-          <td class="nw"><span class="adot" style="background:{{ r.color }}"></span>{{ r.account_name }}</td>
+          <td class="nw">
+            <span class="achip t-{{ r.account_tone }}" style="--ac:{{ r.color }}"
+                  title="你的命名：{{ r.account_label }}{% if r.account_verified %} · 已确认登录身份{% else %} · 身份未确认{% endif %}">
+              <i></i>{{ r.account_name }}</span>
+          </td>
           <td class="ellip2" title="{{ r.material_title }}">{{ r.material_title or '(无标题)' }}</td>
           <td class="nw">
             {% if r.status == 'success' %}<span class="pill ok">成功</span>

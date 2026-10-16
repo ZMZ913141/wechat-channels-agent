@@ -54,8 +54,11 @@
     };
   }
 
+  // 图例/系列名用**实测昵称**（辨识度最高），并在未确认时加标记。
+  // 颜色仍是账号固定色；状态另用 t-* 类表达，二者不混用。
   var acctSeries = D.accounts.map(function (a) {
-    return { name: a.name, color: a.color, id: a.account_id };
+    var mark = a.verified ? '' : (a.tone === 'bad' ? ' ⚠未登录' : ' ⚠未检测');
+    return { name: a.name + mark, real: a.name, color: a.color, id: a.account_id };
   });
 
   /* ---------- ① 发布趋势：堆叠柱（账号）+ 成功率折线 ---------- */

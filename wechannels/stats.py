@@ -47,6 +47,27 @@ def account_color_map() -> dict:
     return out
 
 
+def account_identity_map() -> dict:
+    """账号 id → 辨识信息（可信昵称 / 你的命名 / 可信度）。
+
+    这是「按账号区分」的关键：图例与卡片里显示的是**实测昵称**，
+    而不是你自己起的标签——「视频号 2」这种名字无法区分真实身份。
+    """
+    from . import loginprobe
+
+    out = {}
+    for a in accounts.load_accounts():
+        d = loginprobe.display_name(a)
+        out[a["id"]] = {
+            "primary": d["primary"],# 可信昵称优先，否则你的命名
+            "secondary": d.get("secondary", ""),
+            "tone": d["tone"],
+            "verified": d["verified"],
+            "label": a.get("name") or a["id"],
+        }
+    return out
+
+
 def _pct(a: int, b: int) -> float:
     return round(a * 100.0 / b, 1) if b else 0.0
 
@@ -66,6 +87,7 @@ def _hour(ts: str) -> int:
 def build(days: int = 30, account_id: str = "") -> dict:
     """聚合出看板所需的全部数据。返回的 dict 直接内联进模板。"""
     colors = account_color_map()
+    ident = account_identity_map()
     accs = accounts.load_accounts()
 
     rows = []          # 每条 target 一行（明细表）
@@ -78,7 +100,11 @@ def build(days: int = 30, account_id: str = "") -> dict:
             "material_title": b.get("material_title", ""),
             "requested_at": b.get("requested_at", ""),
             "account_id": aid,
-            "account_name": t.get("account_name") or _acc_name(accs, aid),
+            # 优先用实测昵称（辨识度最高），label 是你自己的命名
+            "account_name": ident.get(aid, {}).get("primary") or _acc_name(accs, aid),
+            "account_label": ident.get(aid, {}).get("label") or _acc_name(accs, aid),
+            "account_tone": ident.get(aid, {}).get("tone", "warn"),
+            "account_verified": ident.get(aid, {}).get("verified", False),
             "color": colors.get(aid, "#9aa3b2"),
             "status": t.get("status", ""),
             "status_label": STATUS_LABEL.get(t.get("status", ""), t.get("status", "")),
@@ -131,7 +157,12 @@ def build(days: int = 30, account_id: str = "") -> dict:
         ds = sorted(r["duration_ms"] for r in rs if r["duration_ms"] > 0)
         acct_stats.append({
             "account_id": aid,
-            "name": a.get("name") or aid,
+            # 主显示名= 实测昵称（可信时），否则退回你的命名
+            "name": ident.get(aid, {}).get("primary") or (a.get("name") or aid),
+            "label": ident.get(aid, {}).get("label") or (a.get("name") or aid),
+            "note": ident.get(aid, {}).get("secondary", ""),
+            "tone": ident.get(aid, {}).get("tone", "warn"),
+            "verified": ident.get(aid, {}).get("verified", False),
             "color": colors.get(aid, "#9aa3b2"),
             "total": len(rs),
             "success": s,
@@ -204,6 +235,7 @@ def build(days: int = 30, account_id: str = "") -> dict:
         "rows": rows[:300],         # 明细表最多300 行，避免页面过大
         "row_total": len(rows),
         "colors": colors,
+        "identity": ident,
         "has_data": total_targets > 0,
     }
 

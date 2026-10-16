@@ -143,10 +143,43 @@ def accounts_channel(a: dict) -> str:
 
 
 def login_badge(aid: str) -> str:
-    """登录态徽章（含实测身份）。注册为全局后模板可直接调用。"""
+    """登录态徽章（含实测身份）。注册为全局后模板可直接调用。
+
+    直接展示**实测昵称**并标注可信度——「视频号 2」这种自定标签无法区分真实身份。
+    """
     from .views_accounts import login_badge_html
 
     return login_badge_html(aid)
+
+
+def acc_display(account: dict) -> dict:
+    """账号的辨识名（可信昵称优先 + 你起的名字作副标题）。"""
+    from .. import loginprobe as _lp
+
+    return _lp.display_name(account)
+
+
+def acc_chip(account: dict, with_status: bool = False) -> str:
+    """账号色标+ 名字的小圆点标签，图表/表格/筛选器里通用。
+
+    关键：名字用**可信昵称**，并按可信度着色——
+      ok=绿(身份已确认) / warn=黄(未检测) / bad=红(未真正登录)
+    这样一眼就能看出「这个色块到底是哪个号、它登录了吗」。
+    """
+    from .. import loginprobe as _lp
+    from ..stats import account_color_map
+
+    d = _lp.display_name(account)
+    color = account_color_map().get(account["id"], "#9aa3b2")
+    esc = html.escape(str(d["primary"]))
+    sub = html.escape(str(d.get("secondary") or ""))
+    title = f'{d["primary"]}' + (f' · {d["secondary"]}' if sub else "")
+    if not with_status:
+        return (f'<span class="achip t-{d["tone"]}" style="--ac:{color}" '
+                f'title="{title}"><i></i>{esc}</span>')
+    icons = {"ok": "✓", "warn": "⚠", "bad": "✗"}
+    return (f'<span class="achip t-{d["tone"]}" style="--ac:{color}" '
+            f'title="{title}"><i></i>{icons[d["tone"]]} {esc}</span>')
 
 
 def dt_local(value) -> str:
@@ -171,5 +204,7 @@ app.jinja_env.globals.update(
     accounts_channel=accounts_channel,
     login_badge=login_badge,
     media_url=media_url,
+    acc_display=acc_display,
+    acc_chip=acc_chip,
 )
 app.jinja_env.filters["dt_local"] = dt_local

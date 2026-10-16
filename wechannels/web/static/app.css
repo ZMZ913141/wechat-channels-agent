@@ -220,3 +220,47 @@
 .pill.ok{background:rgba(34,197,94,.16);color:var(--ok)}
 .pill.bad{background:rgba(239,68,68,.16);color:var(--bad)}
 .pill.warn{background:rgba(245,158,11,.16);color:var(--warn)}
+
+/* ===========================================================================
+   账号辨识度增强
+   —— 核心：名字用「实测登录的视频号昵称」，而不是你自己起的标签
+   =========================================================================== */
+/* 账号色标标签：色块 + 昵称，可信度用边框/文字色区分 */
+.achip{display:inline-flex;align-items:center;gap:5px;padding:1px 8px 1px 5px;
+  border-radius:20px;font-size:12px;background:var(--elev2);
+  border:1px solid var(--line);white-space:nowrap;max-width:100%}
+.achip i{display:inline-block;width:9px;height:9px;border-radius:3px;
+  background:var(--ac);flex:0 0 auto}
+.achip.t-ok{border-color:color-mix(in srgb, var(--ok) 40%, transparent)}
+.achip.t-warn{border-color:color-mix(in srgb, var(--warn) 45%, transparent)}
+.achip.t-bad{border-color:color-mix(in srgb, var(--bad) 50%, transparent);
+  background:color-mix(in srgb, var(--bad) 10%, var(--elev2))}
+.achip.t-bad i{opacity:.55}
+.achip.t-bad{color:var(--bad)}
+.achip.t-warn{color:var(--warn)}
+
+/* 账号卡片：可信度描边 + 验证标记 */
+.astat.t-bad{border-color:color-mix(in srgb, var(--bad) 35%, var(--line))}
+.astat.t-warn{border-color:color-mix(in srgb, var(--warn) 32%, var(--line))}
+.astat.t-ok{border-color:color-mix(in srgb, var(--ok) 28%, var(--line))}
+.averify{margin-left:auto;font-size:10.5px;padding:1px 7px;border-radius:20px;white-space:nowrap}
+.averify.ok{background:color-mix(in srgb, var(--ok) 16%, transparent);color:var(--ok)}
+.averify.warn{background:color-mix(in srgb, var(--warn) 16%, transparent);color:var(--warn)}
+.averify.bad{background:color-mix(in srgb, var(--bad) 16%, transparent);color:var(--bad)}
+.alabel{font-size:10.5px;color:var(--mut);margin:-4px 0 8px;opacity:.85}
+
+/* 未验证警告条 */
+.warnbox{margin:10px 0 0;padding:9px 12px;border-radius:8px;font-size:12px;
+  background:color-mix(in srgb, var(--bad) 10%, transparent);
+  border:1px solid color-mix(in srgb, var(--bad) 35%, transparent);color:var(--bad)}
+
+/* 账号页的登录身份行 */
+.lrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.lname{font-weight:600;font-size:12.5px}
+.lrow.ok .lname{color:var(--ok)}
+.lrow.warn .lname{color:var(--warn)}
+.lrow.bad .lname{color:var(--bad)}
+.ltag{font-size:10px;padding:1px 6px;border-radius:20px;white-space:nowrap}
+.ltag.ok{background:color-mix(in srgb, var(--ok) 16%, transparent);color:var(--ok)}
+.ltag.warn{background:color-mix(in srgb, var(--warn) 16%, transparent);color:var(--warn)}
+.ltag.bad{background:color-mix(in srgb, var(--bad) 16%, transparent);color:var(--bad)}

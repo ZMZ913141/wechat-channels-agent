@@ -13,35 +13,46 @@ CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
 
 
 def login_badge_html(aid: str) -> str:
-    """账号的登录态徽章：cookie 启发式 + 实测身份。
+    """账号的登录态徽章：显示**实测登录的视频号昵称** + 可信度标记。
 
-    实测身份是关键——多账号最隐蔽的事故是两个号登成了同一个视频号，
-    这里直接显示昵称，一眼就能看出有没有登错。
+    多账号最隐蔽的事故是两个号登成了同一个视频号，这里直接显示昵称就能看出来。
+    昵称是占位符（"微信用户"）时**明确标红警示**，绝不把它当身份显示——
+    否则三个号会全显示"微信用户"，等于没有辨识度。
     """
+    from .. import loginprobe as _lp
+
     acc = accounts.get_account(aid)
     if not acc:
         return ""
-    try:
-        st = login_state.status(accounts.profile_path(acc))
-    except Exception:
-        st = {"logged_in": False, "fresh": False, "detail": ""}
-    cls = "ok" if (st["logged_in"] and st["fresh"]) else ("warn" if st["logged_in"] else "bad")
-    txt = "已登录" if (st["logged_in"] and st["fresh"]) else ("可能失效" if st["logged_in"] else "未登录")
-
-    ident = loginprobe.identity_summary(aid)
-    nick = ""
-    if ident.get("known"):
-        stale = "（较旧）" if ident.get("stale") else ""
-        if ident.get("logged_in"):
-            nick = (f'<div class="muted" style="font-size:11px">实测视频号：'
-                    f'<b>{html.escape(str(ident.get("nickname") or "（读不到昵称）"))}</b>'
-                    f'{stale}</div>')
-        else:
-            nick = f'<div class="bad" style="font-size:11px">实测未登录：{html.escape(str(ident.get("detail", "")))}</div>'
-    return (
-        f'<span class="dot {cls}" title="{html.escape(str(st.get("detail", "")))}"></span>'
-        f'<span class="muted" style="font-size:11px">{txt}</span>{nick}'
-    )
+    d = _lp.display_name(acc)
+    esc = html.escape(str(d["primary"]))
+    if d["verified"]:
+        badge = (
+            f'<div class="lrow ok"><span class="lname">{esc}</span>'
+            f'<span class="ltag ok" title="已实测确认：这是该档案实际登录的视频号">已确认</span></div>'
+        )
+    elif d["placeholder"]:
+        badge = (
+            f'<div class="lrow bad"><span class="lname">{esc}</span>'
+            f'<span class="ltag bad" title="昵称显示为平台默认占位，说明该档案未真正登录">'
+            f'未真正登录</span></div>'
+            f'<div class="muted" style="font-size:10.5px">实测昵称为占位符，请重新扫码</div>'
+        )
+    elif d["secondary"].startswith("已登录"):
+        badge = (
+            f'<div class="lrow warn"><span class="lname">{esc}</span>'
+            f'<span class="ltag warn">昵称未读到</span></div>'
+        )
+    elif d["known"]:
+        badge = (
+            f'<div class="lrow bad"><span class="lname">{esc}</span>'
+            f'<span class="ltag bad">未登录</span></div>'
+        )
+    else:
+        badge = '<div class="muted" style="font-size:11px">尚未检测</div>'
+    at = html.escape(str(d.get("at") or ""))
+    stamp = f'<div class="muted" style="font-size:10px">检测于 {at}</div>' if at else ""
+    return badge + stamp
 
 
 @app.route("/accounts")

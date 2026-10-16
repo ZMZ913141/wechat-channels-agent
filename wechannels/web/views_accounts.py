@@ -65,7 +65,8 @@ def accounts_page():
                '点「扫码登录」用对应微信号登录后即可使用。</div>')
     elif m == "login":
         msg = ('<div class="msg ok">已打开扫码窗口（新弹出的控制台窗口有操作提示）。'
-               '用微信扫描页面二维码并确认，控制台出现「登录成功」即可。</div>')
+               '用微信扫描页面二维码并确认，控制台出现「登录成功」即可。'
+               '完成后<b>关闭浏览器窗口</b>，登录态就保存好了。</div>')
     elif m.startswith("probe:"):
         tip = m[6:]
         cls = "ok" if tip.startswith("已登录") else "bad"
@@ -115,7 +116,7 @@ def accounts_login(aid):
     if not accounts.get_account(aid):
         return redirect(url_for("accounts_page"))
     # 扫码登录需要独占浏览器档案：打暂停标记，正在进行的发布会主动避开
-    proclock.pause(aid, reason="扫码登录")
+    proclock.pause(aid, reason="扫码登录", owner="manual")
     # open_publish.py 通过环境变量 ACCOUNT_ID 接收账号
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8",
            "ACCOUNT_ID": aid}
@@ -177,7 +178,7 @@ def open_publish():
     aid = request.args.get("account") or accounts.current_account_id()
     if not accounts.get_account(aid):
         return redirect(url_for("index"))
-    proclock.pause(aid, reason="手动打开发表页")
+    proclock.pause(aid, reason="手动打开发表页", owner="manual")
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8",
            "ACCOUNT_ID": aid}
     subprocess.Popen(

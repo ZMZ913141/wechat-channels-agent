@@ -115,7 +115,7 @@ def account_id_of_profile(profile_dir: str) -> str:
 
 
 def acquire(profile_dir: str, tag: str, wait_s: float = 0.0, poll_s: float = 1.5,
-            respect_pause: bool = True) -> tuple:
+            respect_pause: bool = True, owner: str = "") -> tuple:
     """抢档案锁。返回 (True, None) 或 (False, 占用者信息 dict)。
 
     wait_s > 0 时最多等待这么久。
@@ -123,14 +123,17 @@ def acquire(profile_dir: str, tag: str, wait_s: float = 0.0, poll_s: float = 1.5
     respect_pause：自动流程（发布等）设为 True —— 若该档案所属账号正处于
     「手动操作暂停窗口」（用户正在扫码登录/打开发表页），**直接拒绝**而不是
     抢锁。原因：手动操作是用户显式发起的、优先级高于后台自动流程；
-    而且手动窗口可能长达 30 分钟，等下去毫无意义。
-    手动操作自己调acquire 时传 False，否则会被自己的标记挡住。
+    而且手动窗口可能长达 30分钟，等下去毫无意义。
+
+    owner：本次操作的发起方标识。若与暂停标记的 owner 一致，说明**就是它自己
+    打的那个标记**，应当豁免。否则会出现「点扫码登录 → 打标记 → 被自己拦住」
+    的死锁（这个 bug 真实发生过）。
     """
     if respect_pause:
         acc_id = account_id_of_profile(profile_dir)
         if acc_id:
             p = paused(acc_id)
-            if p:
+            if p and not (owner and p.get("owner") == owner):
                 left = max(0, int(float(p.get("until", 0)) - time.time()))
                 return False, {
                     "pid": 0,
@@ -312,14 +315,21 @@ def _write_pause(d: dict) -> None:
         pass
 
 
-def pause(account_id: str, seconds: int = DEFAULT_PAUSE_S, reason: str = "") -> dict:
-    """给某账号打暂停标记（后台监控会跳过它，把浏览器档案让给手动操作）。"""
+def pause(account_id: str, seconds: int = DEFAULT_PAUSE_S, reason: str = "",
+          owner: str = "") -> dict:
+    """给某账号打暂停标记（自动流程会避开它，把浏览器档案让给手动操作）。
+
+    owner 标记暂停的发起方（如 "login" / "open_publish"）。作用是让**发起方自己**
+    能豁免这个标记——否则会出现「点了扫码登录→ 打上暂停标记 → 打开浏览器时被
+    自己的标记拦住」这种自己把自己锁在门外的死锁。
+    """
     d = _read_pause()
     now = time.time()
     d[account_id] = {
         "until": now + max(60, int(seconds)),
         "reason": reason or "手动操作（打开发表页 / 扫码登录）",
         "since": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "owner": owner or "",
     }
     _write_pause(d)
     return d[account_id]

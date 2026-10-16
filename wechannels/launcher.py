@@ -78,13 +78,21 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
     print(f"[INFO] 登录档案：{profile}")
     print(f"[INFO] 浏览器内核偏好：{accounts.channel_label(acc)}")
 
-    ok, holder = proclock.acquire(profile, f"打开发表页（{aid}）", wait_s=45)
+    # owner="manual"：这次打开本身就是「手动操作」，若面板已经为该账号打了
+    # 暂停标记（点扫码登录时打的），要豁免自己——否则自己把自己拦在门外。
+    ok, holder = proclock.acquire(
+        profile, f"打开发表页（{aid}）", wait_s=45,
+        respect_pause=True, owner="manual",
+    )
     if not ok:
         print(f"[ERROR] 档案被占用：{proclock.holder_desc(holder)}")
-        print("[HINT] 这是「同一个档案被两个进程同时打开」的典型情况——")
-        print("[HINT] 此时打开浏览器也拿不到登录态。请二选一：")
-        print("[HINT]   1) 在面板点「■ 停止监控」，再点「打开发表页」；")
-        print("[HINT]   2) 面板「打开发表页」会自动为该账号暂停监控，优先用面板按钮。")
+        print("[HINT] 同一个浏览器档案不能被两个进程同时打开，此时硬开也拿不到登录态。")
+        print("[HINT] 常见原因与处理：")
+        print("[HINT]   1) 上一次打开的浏览器窗口还没关 → 直接关掉再试")
+        print("[HINT]   2) 另一个账号正在发布 → 稍等它结束，或到面板看发布进度")
+        print("[HINT]   3) 该账号被标记为「手动操作中」但窗口已关 → 面板点「解除暂停」")
+        print("[HINT]   4) 残留锁（进程被强杀）→ 面板点「🧹 素材库维护」旁边的清理，"
+              "或删除 state/profile_*.lock")
         return
 
     try:

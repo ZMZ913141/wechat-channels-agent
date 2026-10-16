@@ -1,0 +1,18 @@
+# 依赖与运行环境
+.venv/
+__pycache__/
+*.pyc
+
+# 本地状态（账号/素材/心跳/通知记录，含可能的敏感信息）
+state/
+profiles/
+browser_profile/
+media/
+
+# 敏感配置
+.env
+
+# 编辑器/系统
+.vscode/
+.idea/
+.DS_Store

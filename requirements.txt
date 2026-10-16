@@ -1,0 +1,13 @@
+# 核心依赖
+browser-use
+playwright
+python-dotenv
+requests
+# LLM 驱动（默认用 OpenAI 兼容接口，DeepSeek / OpenAI 均可；私信监控需要）
+langchain-openai
+# 本地管理面板
+flask
+
+# 可选：如用 Google / Anthropic 模型，取消下面注释
+# langchain-google-genai
+# langchain-anthropic

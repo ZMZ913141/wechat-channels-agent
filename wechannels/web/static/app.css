@@ -354,3 +354,17 @@ button.mini:hover,.mactions a.mini:hover{background:var(--elev);border-color:var
   background:color-mix(in srgb, var(--acc) 12%, transparent);
   color:var(--acc);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mcoll a:hover{background:color-mix(in srgb, var(--acc) 22%, transparent)}
+
+/* ===========================================================================
+   数据备份
+   =========================================================================== */
+.bklist{display:flex;flex-direction:column;gap:8px}
+.bkitem{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:10px 13px;border:1px solid var(--line);border-radius:9px;background:var(--elev)}
+.bkitem .bkname{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.bkitem .bklabel{font-size:12px;padding:1px 8px;border-radius:20px;
+  background:var(--elev2);color:var(--mut)}
+.bkitem .bknewest{border-color:var(--acc);
+  background:color-mix(in srgb, var(--acc) 8%, var(--elev))}
+.bkitem .bkmeta{font-size:11.5px;color:var(--mut);
+  font-family:ui-monospace,Menlo,Consolas,monospace}

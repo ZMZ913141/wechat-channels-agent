@@ -8,7 +8,8 @@ import uuid
 
 from flask import redirect, render_template, request, url_for
 
-from .. import accounts, config, login_state, materials, media_probe, proclock
+from .. import (accounts, backup, config, ledger, login_state, materials,
+                 media_probe, proclock)
 from .base import app, BASE_DIR
 from .templating import decorate
 
@@ -184,6 +185,43 @@ def materials_batch_upload():
         # 只有一条时直接跳到编辑页，省得再手工填文案
         return redirect(url_for("edit_material", mid=added[0]["id"]))
     return redirect(url_for("index", msg=msg))
+
+
+@app.route("/backup")
+def backup_page():
+    return render_template(
+        "backup.html",
+        backups=backup.list_backups(),
+        items=materials.load_materials(),
+        cols=materials.load_collections(),
+        batches=len(ledger.load_batches()),
+        accs=len(accounts.load_accounts()),
+        backup_path=backup.backup_dir(),
+        msg=request.args.get("msg", ""),
+        msg_cls=request.args.get("cls", "ok"),
+        title="数据备份",
+    )
+
+
+@app.route("/backup/create", methods=["POST"])
+def backup_create_route():
+    r = backup.create(label="手动备份")
+    if not r.get("ok"):
+        return redirect(url_for("backup_page", msg=r.get("reason", "备份失败"),
+                                cls="bad"))
+    return redirect(url_for("backup_page", msg=f"✓ 已备份（{len(r['files'])} 个文件）"))
+
+
+@app.route("/backup/restore", methods=["POST"])
+def backup_restore_route():
+    r = backup.restore(request.form.get("name", ""))
+    if r.get("ok"):
+        extra = f"，还原前快照：{r['snapshot']}" if r.get("snapshot") else ""
+        return redirect(url_for(
+            "backup_page",
+            msg=f"✓ 已还原 {len(r['restored'])} 个文件{extra}（页面请手动刷新）"))
+    return redirect(url_for("backup_page", msg="✗ " + r.get("reason", "还原失败"),
+                            cls="bad"))
 
 
 @app.route("/collections")

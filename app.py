@@ -57,13 +57,21 @@ def main():
         print("    仅在完全可信的网络里使用，且不要开放到公网。")
         print("=" * 60)
 
-    from wechannels import accounts, config
+    from wechannels import accounts, backup, config
 
     _migrate_legacy_once()
+
+    # 数据安全兜底：检测到状态数据有变化就自动留一份档。
+    # 素材库/发布记录是用户辛苦积累的，只存在几个 JSON 里，丢了没法重来。
+    try:
+        backup.auto_backup_if_changed()
+    except Exception as e:
+        print(f"[WARN] 自动备份失败（不影响使用）：{str(e)[:60]}")
 
     accs = accounts.load_accounts()
     print(f"· 账号数：{len(accs)}  当前：{accounts.current_account_id()}")
     print(f"· 发布方式：{config.PUBLISH_METHOD}（deterministic=零 token / agent=依赖 LLM）")
+    print(f"· 发布窗口：{'无头后台（不弹窗）' if config.PUBLISH_HEADLESS else '有头（可肉眼确认）'}")
     print(f"· 面板地址： http://{args.host}:{args.port}")
     print("· 停止： Ctrl+C\n")
     app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)

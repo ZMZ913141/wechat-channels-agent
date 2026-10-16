@@ -141,18 +141,50 @@
 
 ---
 
-## 六、这套架构还剩什么已知短板
+## 六、项目结构与已知短板
 
-诚实列出来，方便你判断是否值得继续投入：
+### 代码组织
 
-| 短板 | 影响 | 建议 |
+```
+app.py                       入口：装配 + 启动（~60 行，无业务逻辑）
+open_publish.py              CLI：打开发表页 / 扫码登录
+wechannels/
+  config.py                  配置（全部来自 .env，带默认值）
+  accounts.py                多账号管理
+  proclock.py                两层锁：账号锁 + 档案锁
+  materials.py               素材库数据层（含标签/去重/孤儿检测）
+  publish.py                 发布编排（多账号串行 + 任务状态）
+  publish_pw.py              确定性发布（Playwright 直填表单）
+  launcher.py                有头浏览器打开 / 扫码登录
+  loginprobe.py              登录态探针（显示实际登录的视频号昵称）
+  login_state.py             cookie 启发式登录态判断
+  media_probe.py             视频合规预检（ffprobe）
+  autofill.py                AI 智能填写文案
+  browser.py                 browser-use 工厂（回退方案用）
+  web/
+    base.py                  Flask 实例
+    templating.py            Jinja2 全局函数
+    views_core.py            首页 / 素材 CRUD / 媒体服务
+    views_library.py         维护页 / 目录导入
+    views_accounts.py        账号管理
+    views_publish.py         发布中心
+    templates/               base + 7 页面 + partials + macros
+    static/                  app.css + 6 个独立 JS
+```
+
+**为什么是 Jinja2 而不是字符串拼接**：早期 `app.py` 把路由、CSS、JS、HTML 混在
+一个文件里，用 `html.replace('{placeholder}', ...)` 拼页面——改版时极脆弱，
+IDE 也无法为 HTML/JS 做语法高亮。现在模板与静态资源分离，CSS/JS 可被浏览器缓存。
+
+### 已知短板
+
+| 短板 | 影响 | 状态 |
 |---|---|---|
-| `app.py` 1982 行，路由与视图混排 | 难维护 | 拆 Jinja 模板 + 静态资源 |
-| 素材管理**无标签/去重/定时清理** | 素材多了难维护 | **优先加标签检索** |
-| 定时发表/封面依赖 DOM 文本匹配 | 视频号改版可能失效 | 已做「未生效如实回报」兜底，会截图 |
-| 无 `secret_key`/CSRF | 若改 `host=0.0.0.0` 即任意文件读取 | 保持绑 127.0.0.1，或加鉴权 |
-| 公众号模块（`mp.py`）是独立功能 | 与视频号发布无关，占着 `requests` 依赖 | 若确定不用可删 |
-| 发布为**串行**，多账号需排队 | 号多时耗时长 | 目前刻意不并行：并行会放大风控与带宽风险 |
+| 定时发表/封面依赖 DOM 文本匹配 | 视频号改版可能失效 | 已做「未生效如实回报」+ 失败截图兜底 |
+| 发布为**串行**，多账号需排队 | 号多时耗时长 | 刻意不并行：并行会放大风控与带宽风险 |
+| 无 `secret_key`/CSRF | 若改 `host=0.0.0.0` 即任意文件读取 | 已加启动警告；保持绑 127.0.0.1 |
+| 素材库无全文检索/缩略图缓存 | 素材上千后筛选变慢 | 现有标签+状态+关键词已够用 |
+| 状态持久化用 JSON 文件 | 并发写有理论风险 | 单进程使用，实际无影响 |
 
 ---
 

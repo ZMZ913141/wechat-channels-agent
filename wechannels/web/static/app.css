@@ -327,3 +327,30 @@ button.mini:hover,.mactions a.mini:hover{background:var(--elev);border-color:var
 /* 发布中心左侧预览列不要被视频撑破 */
 .pubgrid>div{min-width:0}
 .pubgrid .preview{min-width:0}
+
+/* ===========================================================================
+   素材库：分页 + 懒加载 + 合集标记
+   =========================================================================== */
+/* 分页条 */
+.pager{display:flex;gap:6px;align-items:center;flex-wrap:wrap;
+  margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+.pbtn{display:inline-flex;align-items:center;padding:4px 11px;border-radius:7px;
+  font-size:12.5px;border:1px solid var(--line);background:var(--elev);
+  color:var(--fg);text-decoration:none;min-width:32px;justify-content:center;
+  font-family:ui-monospace,Menlo,Consolas,monospace}
+.pbtn:hover{border-color:var(--acc);color:var(--acc)}
+.pbtn.on{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+.pbtn.dis{opacity:.4;pointer-events:none}
+
+/* 懒加载占位：未加载时先显示骨架，避免大片空白 */
+.thumb[data-thumb]{background:var(--elev2)}
+.thumb img[data-src],.thumb video[data-src]{opacity:0;transition:opacity .2s}
+.thumb img,.thumb video{opacity:1}
+
+/* 卡片上的合集标记 */
+.mcoll{margin:2px 0 5px}
+.mcoll a{display:inline-flex;align-items:center;gap:3px;font-size:11px;
+  padding:1px 7px;border-radius:20px;text-decoration:none;
+  background:color-mix(in srgb, var(--acc) 12%, transparent);
+  color:var(--acc);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcoll a:hover{background:color-mix(in srgb, var(--acc) 22%, transparent)}

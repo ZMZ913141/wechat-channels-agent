@@ -1,11 +1,18 @@
-{# 素材卡片 —— 首页网格里的单张卡片 #}
+{# 素材卡片 —— 首页网格里的单张卡片
+   注意：thumb() 产出的 <video preload="metadata"> 每次都是一次 HTTP 请求。
+   素材上千时不能全量加载，所以用 data-src 懒加载（IntersectionObserver），
+   只有滚动进视口的卡片才真正请求。 #}
 {% macro material_card(m, label_filter='') %}
 <div class="mcard {{ status_class(m.status) }}">
   <input type="checkbox" class="check-mat" name="mids" value="{{ m.id }}"
          onchange="selChanged(this)">
-  <div class="thumb">{{ thumb(m)|safe }}</div>
+  <div class="thumb" data-thumb data-mid="{{ m.id }}">{{ thumb_lazy(m)|safe }}</div>
   <div class="mbody">
     <div class="mtitle" title="{{ m.title }}">{{ m.title or '(无标题)' }}</div>
+
+    {% if m.collection %}
+    <div class="mcoll"><a href="/?collection={{ m.collection|urlencode }}" title="按合集筛选">📚 {{ m.collection }}</a></div>
+    {% endif %}
 
     {# 分类标签：内部管理用，可点筛选 #}
     <div class="mlabels">

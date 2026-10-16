@@ -142,6 +142,26 @@ def accounts_channel(a: dict) -> str:
     return _acc.channel_of(a)
 
 
+def thumb_lazy(m: dict) -> str:
+    """卡片缩略图的**懒加载**版本。
+
+    与 thumb() 的区别：不直接写 src，而是写 data-src + data-kind。
+    由 static/lazyload.js 在卡片滚动进视口时才填 src。
+
+    为什么必须懒加载：<video preload="metadata"> 即使只取元数据也是一次
+    HTTP 请求。素材库一次渲染 60 张卡片 = 60 个并发请求，
+    1000 条会直接把浏览器打死。懒加载后首屏通常只请求 6-10 个。
+    """
+    cover = (m.get("cover_path") or "").strip()
+    video = (m.get("video_path") or "").strip()
+    if cover and os.path.exists(cover):
+        return (f'<img data-src="{media_url(cover)}" alt="" loading="lazy" decoding="async">')
+    if video and os.path.exists(video):
+        return (f'<video data-src="{media_url(video)}" data-kind="video" muted playsinline '
+                f'onerror="this.parentNode.classList.add(\'noimg\')"></video>')
+    return '<div class="nothumb">无预览</div>'
+
+
 def login_badge(aid: str) -> str:
     """登录态徽章（含实测身份）。注册为全局后模板可直接调用。
 
@@ -206,5 +226,6 @@ app.jinja_env.globals.update(
     media_url=media_url,
     acc_display=acc_display,
     acc_chip=acc_chip,
+    thumb_lazy=thumb_lazy,
 )
 app.jinja_env.filters["dt_local"] = dt_local

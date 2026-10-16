@@ -27,7 +27,7 @@ def index():
     sort = request.args.get("sort", "new")
     coll_f = request.args.get("collection", "")
 
-    # 批量上传结果提示：如实说清"入库几个、跳过几个"，否则用户会以为失败
+    # 批量上传/批量操作结果提示：如实说清"入库几个、跳过几个"，否则用户会以为失败
     flash = ""
     fm = request.args.get("msg", "")
     if fm.startswith("batch_upload:"):
@@ -39,6 +39,12 @@ def index():
         if skipped:
             flash += (f'<div class="msg bad">⚠ 有 {skipped} 个文件被跳过'
                       f'（不是支持的视频格式，或保存失败）</div>')
+    elif fm.startswith("batch:"):
+        parts = fm.split(":", 2)
+        n = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        text = parts[2] if len(parts) > 2 else ""
+        cls = "bad" if n == 0 else "ok"
+        flash = f'<div class="msg {cls}">{"✗" if n == 0 else "✓"} {html.escape(text)}</div>'
 
     items = materials.load_materials(aid)
     if sf:
@@ -58,6 +64,25 @@ def index():
     else:
         items.reverse()
 
+    # ---- 分页 ----
+    # 为什么必须分页：素材上千时全量渲染会产出 ~2MB HTML，
+    # 且每张卡片的 <video preload=metadata> 都是一次 HTTP 请求
+    # （1000 条 = 1000 并发请求，浏览器直接卡死）。
+    total = len(items)
+    try:
+        per_page = min(200, max(20, int(request.args.get("size", "60") or 60)))
+    except (TypeError, ValueError):
+        per_page = 60
+    try:
+        page = max(1, int(request.args.get("page", "1") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    pages = max(1, (total + per_page - 1) // per_page)
+    if page > pages:
+        page = pages
+    start = (page - 1) * per_page
+    page_items = items[start:start + per_page]
+
     return render_template(
         "index.html",
         accounts=accounts.load_accounts(),
@@ -65,8 +90,11 @@ def index():
         cur_account_name=acc.get("name") or aid,
         account_count=len(accounts.load_accounts()),
         count=len(materials.load_materials(aid)),
-        items=[decorate(m) for m in items],
+        items=[decorate(m) for m in page_items],
         sf=sf, label_filter=label_filter, q=q, sort=sort,
+        # 分页上下文（切换筛选时靠它拼链接）
+        page=page, pages=pages, per_page=per_page,
+        total_shown=total, offset=start,
         all_label_names=[n for n, _ in materials.all_labels(aid)],
         collections=materials.load_collections(),
         coll_counts=materials.collection_counts(aid),
@@ -316,15 +344,39 @@ def materials_batch():
     op = request.form.get("op", "")
     if not mids:
         return redirect(url_for("index"))
+    msg = ""
     if op == "delete":
         materials.delete_many(mids)
+        msg = f"batch:{len(mids)}:已删除素材记录（视频文件未动）"
     elif op.startswith("mark_"):
         st = op[len("mark_"):]
         if st in materials.STATUSES:
             materials.set_status_many(mids, st)
+            msg = f"batch:{len(mids)}:已标记为「{st}」"
     elif op in ("label_add", "label_replace", "label_remove"):
         mode = {"label_add": "add", "label_replace": "replace", "label_remove": "remove"}[op]
         materials.set_labels_many(mids, request.form.get("labels", ""), mode=mode)
+        verb = {"add": "追加", "replace": "替换", "remove": "移除"}[mode]
+        msg = f"batch:{len(mids)}:已{verb}标签"
+    elif op in ("collection_set", "collection_clear"):
+        # 合集是"发布时要归入"的关键字段，批量设置能省掉逐条进编辑页
+        if op == "collection_clear":
+            materials.set_collection_many(mids, "")
+            msg = f"batch:{len(mids)}:已清空合集"
+        else:
+            name = (request.form.get("collection") or "").strip()
+            if name:
+                known = materials.collection_names()
+                if name not in known:
+                    # 如实回报，不静默写一个不存在的合集名（发布时会选不中）
+                    return redirect(url_for(
+                        "index", msg=f"batch:{0}:合集「{name}」不在合集清单里，请先到「合集管理」登记"))
+                materials.set_collection_many(mids, name)
+                msg = f"batch:{len(mids)}:已归入合集「{name}」"
+            else:
+                return redirect(url_for("index", msg="batch:0:请先选择合集"))
+    if msg:
+        return redirect(url_for("index", msg=msg))
     return redirect(url_for("index"))
 
 

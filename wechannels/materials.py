@@ -635,6 +635,29 @@ def all_labels(account_id: str | None = None) -> list:
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
+def set_collection_many(mids: list, name: str) -> int:
+    """批量设置合集。传空串表示清空合集。返回被改动的条数。
+
+    只改collection 字段，不动标题/文案/发布历史。
+    """
+    n = (name or "").strip()
+    items = load_materials()
+    ids = set(mids)
+    changed = 0
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    for it in items:
+        if it["id"] not in ids:
+            continue
+        if (it.get("collection") or "").strip() == n:
+            continue
+        it["collection"] = n
+        it["updated_at"] = now
+        changed += 1
+    if changed:
+        save_materials(items)
+    return changed
+
+
 def set_labels_many(mids: list, labels, mode: str = "add") -> int:
     """批量给素材打分类标签。
 

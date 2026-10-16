@@ -1,7 +1,9 @@
 <form method="post" action="/materials/new" enctype="multipart/form-data">
   <div class="fillbar" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:4px">
-    <div style="flex:2;min-width:220px"><label>✨ 智能填写：视频文件名或路径</label>
-      <input id="af_name" placeholder="d:/videos/AI模特上新.mp4 或只填文件名"></div>
+    <div style="flex:2;min-width:220px"><label>✨ 智能填写：视频文件名或路径
+        <span class="muted" style="font-size:11px">（填路径会自动识别并回填）</span></label>
+      <input id="af_name" placeholder="d:/videos/AI模特上新.mp4 或只填文件名"
+             onblur="fillFromPathInput()"></div>
     <div style="flex:3;min-width:220px"><label>补充提示（可选，如：女装秋冬新款，温柔风）</label>
       <input id="af_hint" placeholder="告诉 AI 这条视频讲什么，生成更准"></div>
     <div><label>&nbsp;</label>
@@ -23,6 +25,20 @@
   <label>分类标签 <span class="muted">（逗号分隔，仅用于自己检索管理，不会发布出去）</span></label>
   <input name="labels" id="f_labels" placeholder="待剪辑,爆款,双十一" list="dl_labels">
   <datalist id="dl_labels">{{ label_options|safe }}</datalist>
+  <label>合集 <span class="muted">（可选，发布时自动归入；需先在视频号后台建好同名合集）</span>
+    <a class="genbtn" href="/collections" target="_blank" style="margin-left:6px">管理合集</a></label>
+  <select name="collection" id="f_coll">
+    <option value="">不归入合集</option>
+    {% for c in collections %}
+    <option value="{{ c.name }}">{{ c.name }}</option>
+    {% endfor %}
+  </select>
+  {% if not collections %}
+  <div class="muted" style="font-size:11px;margin-top:3px">
+    还没有登记任何合集 —— 可先到
+    <a href="/collections" target="_blank">「合集管理」</a> 把视频号后台已建的合集填进来
+  </div>
+  {% endif %}
   <div class="grid2">
     <div><label>视频标注 <span class="muted">（AI 内容依法须声明）</span>
         <button class="genbtn" type="button" onclick="genField('ai_declare')">✨ 生成</button></label>

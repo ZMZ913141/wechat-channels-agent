@@ -108,6 +108,7 @@ def new_batch(material: dict, account_ids: list, overrides: dict | None = None,
             "visibility": ov.get("visibility", "公开") or material.get("visibility", "公开"),
             "scheduled_at": ov.get("scheduled_at", "") or material.get("scheduled_at", ""),
             "cover_path": ov.get("cover_path", "") or material.get("cover_path", ""),
+            "collection": ov.get("collection", "") or material.get("collection", ""),
             "original": ov.get("original", material.get("original", True)),
         },
         "targets": [

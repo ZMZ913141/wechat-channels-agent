@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}合集管理{% endblock %}
+{% block content %}
+<div class="card">
+  <h2 style="margin:0">📚 合集管理</h2>
+  <p class="muted" style="margin:8px 0 0;font-size:12px;line-height:1.8">
+    <b>重要：</b>视频号合集必须<b>先在视频号后台创建好</b>，这里填的是「已存在的合集名称」。
+    发布时助手会在发表页搜到并选中它——所以<b>名字必须和后台完全一致</b>。<br>
+    后台位置：视频号助手 → 内容管理 → 合集 → 新建合集。
+  </p>
+</div>
+
+{{ msg|safe }}
+
+<div class="card">
+  <form method="post" action="/collections/add" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+    <div style="flex:1;min-width:200px">
+      <label>合集名称 <span class="muted">（与视频号后台保持一致）</span></label>
+      <input name="name" required placeholder="如：秋冬上新" list="dl_colls">
+    </div>
+    <div style="flex:2;min-width:220px">
+      <label>备注 <span class="muted">（可选，仅自己看，如「2026秋冬 · 共20条」）</span></label>
+      <input name="desc" placeholder="2026秋冬">
+    </div>
+    <button class="btn" type="submit">＋ 添加</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>已登记的合集 <span class="sub">{{ cols|length }} 个</span></h3>
+  {% if not cols %}
+  <div class="empty">
+    还没有登记合集。<br>
+    先去<a href="https://channels.weixin.qq.com/platform" target="_blank" rel="noopener">视频号后台</a>
+    建好合集，再回来把名字填进来。
+  </div>
+  {% else %}
+  <div class="tablewrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>合集名称</th><th>备注</th><th>本账号素材数</th><th>登记时间</th><th>操作</th>
+      </tr></thead>
+      <tbody>
+      {% for c in cols %}
+        <tr>
+          <td><b>{{ c.name }}</b></td>
+          <td class="muted">{{ c.desc or '—' }}</td>
+          <td>
+            <a href="/?collection={{ c.name|urlencode }}" class="achip t-ok" style="--ac:var(--acc)">
+              <i></i>{{ counts.get(c.name, 0) }} 条</a>
+          </td>
+          <td class="muted nw">{{ c.created_at[:16] }}</td>
+          <td class="nw">
+            <form method="post" action="/collections/rename" style="display:flex;gap:6px;flex-wrap:wrap">
+              <input type="hidden" name="old" value="{{ c.name }}">
+              <input name="name" value="{{ c.name }}" style="width:130px;padding:3px 7px;font-size:12px"
+                     required>
+              <input name="desc" value="{{ c.desc }}" placeholder="备注"
+                     style="width:130px;padding:3px 7px;font-size:12px">
+              <button class="btn ghost" type="submit" style="padding:4px 10px;font-size:12px">改名</button>
+            </form>
+            <form method="post" action="/collections/delete" style="margin-top:5px"
+                  onsubmit="return confirm('删除合集「{{ c.name }}」？\n引用它的素材会清空合集，但素材本身保留。')">
+              <input type="hidden" name="name" value="{{ c.name }}">
+              <button class="btn ghost" type="submit" style="padding:4px 10px;font-size:12px;color:var(--bad)">删除</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -53,6 +53,8 @@ def publish_page():
         login_badge=login_badge_html,
         probe_html=probe_html,
         job=read_job(),
+        collections=materials.load_collections(),
+        all_collections=materials.collection_names(),
         title="同步发布",
     )
 
@@ -83,6 +85,7 @@ def publish_start():
         "scheduled_at": (request.form.get("scheduled_at") or "").strip(),
         "ext_link": (request.form.get("ext_link") or "").strip(),
         "cover_path": (request.form.get("cover_path") or "").strip(),
+        "collection": (request.form.get("collection") or "").strip(),
     }
     if not mids:
         return redirect(url_for("publish_page", err="请先选择要发布的素材"))

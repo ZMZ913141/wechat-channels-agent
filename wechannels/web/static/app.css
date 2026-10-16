@@ -300,3 +300,30 @@ button.mini,.mactions a.mini{display:inline-flex;align-items:center;
 button.mini:hover,.mactions a.mini:hover{background:var(--elev);border-color:var(--acc)}
 .mactions a.mini.danger{color:var(--bad);border-color:color-mix(in srgb, var(--bad) 35%, var(--line))}
 .mactions a.mini.danger:hover{background:color-mix(in srgb, var(--bad) 12%, var(--elev))}
+
+/* ===========================================================================
+   发布中心 / 编辑页的视频预览区
+   ⚠️ 这些类（.pv-thumb/.pv-cover/.thumbs/.preview）在模板里用了但**从未定义样式**，
+   导致视频元素按原始尺寸撑开，预览区变成占满整屏的黑框（用户截图反馈）。
+   下面给出受约束的尺寸：固定高、保持比例、绝不撑破容器。
+   =========================================================================== */
+.preview{background:var(--elev);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.pv-thumb{width:100%;height:300px;background:#000;display:flex;
+  align-items:center;justify-content:center;overflow:hidden}
+.pv-thumb img,.pv-thumb video{width:100%;height:100%;object-fit:contain;display:block}
+.pv-body{padding:11px 13px;border-top:1px solid var(--line)}
+.pv-title{font-size:15px;font-weight:600;margin-bottom:6px;line-height:1.4}
+.pv-desc{font-size:12.5px;color:var(--mut);white-space:pre-wrap;
+  max-height:120px;overflow:auto;line-height:1.65}
+.pv-cover{padding:11px 13px;border-top:1px solid var(--line)}
+.pv-cover label{margin-top:0}
+
+/* 编辑页的视频/封面预览缩略框 */
+.thumbs{width:100%;height:150px;background:#000;border-radius:8px;overflow:hidden;
+  display:flex;align-items:center;justify-content:center}
+.thumbs img,.thumbs video{width:100%;height:100%;object-fit:contain;display:block}
+.thumbs:empty{display:none}
+
+/* 发布中心左侧预览列不要被视频撑破 */
+.pubgrid>div{min-width:0}
+.pubgrid .preview{min-width:0}

@@ -32,12 +32,133 @@ VIDEO_EXTS = {"mp4", "mov", "m4v", "webm", "avi", "mkv", "flv", "ts"}
 AI_DECLARE_OPTIONS = ["", "内容为AI制作", "内容为虚构剧情", "非AI内容"]
 # 可见范围选项（与官方发布页一致）
 VISIBILITY_OPTIONS = ["公开", "仅好友可见", "私密"]
+
+
+# ===========================================================================
+# 合集（Collection）
+# ===========================================================================
+# ⚠️ 平台约束：视频号合集**必须先在视频号后台创建好**，发布时才能选择。
+# 本工具管理的是「合集名称清单」，发布时在��表页搜到并选中已存在的合集。
+# 这样做的原因：发表页不允许当场新建合集，强行实现会因平台改版而失效。
+_COLLECTIONS_FILE = "collections.json"
+
+
+def _collections_path() -> str:
+    os.makedirs(config.STATE_DIR, exist_ok=True)
+    return os.path.join(config.STATE_DIR, _COLLECTIONS_FILE)
+
+
+def load_collections() -> list:
+    """返回 [{name, desc, order, created_at}]，按 order 排序。"""
+    try:
+        with open(_collections_path(), encoding="utf-8") as f:
+            items = json.load(f)
+        if not isinstance(items, list):
+            return []
+    except Exception:
+        return []
+    for i, it in enumerate(items):
+        it.setdefault("order", i)
+        it.setdefault("desc", "")
+        it.setdefault("name", "")
+    items.sort(key=lambda x: x.get("order", 999))
+    return [x for x in items if x.get("name")]
+
+
+def save_collections(items: list) -> None:
+    with open(_collections_path(), "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=2)
+
+
+def collection_names() -> list:
+    return [c["name"] for c in load_collections()]
+
+
+def add_collection(name: str, desc: str = "") -> dict | None:
+    """新增合集。已存在则返回 None（不静默重复添加）。"""
+    n = (name or "").strip()
+    if not n:
+        return None
+    items = load_collections()
+    if any(c["name"] == n for c in items):
+        return None
+    item = {"name": n, "desc": (desc or "").strip(), "order": len(items),
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    items.append(item)
+    save_collections(items)
+    return item
+
+
+def update_collection(old_name: str, name: str, desc: str = "") -> bool:
+    """重命名合集。**同步更新所有素材上引用它的合集**，否则会出现孤儿引用。"""
+    old_name = (old_name or "").strip()
+    name = (name or "").strip()
+    if not name:
+        return False
+    items = load_collections()
+    hit = False
+    for c in items:
+        if c["name"] == old_name:
+            c["name"] = name
+            c["desc"] = (desc or c.get("desc", "")).strip()
+            hit = True
+            break
+    if not hit:
+        return False
+    # 同名冲突检查
+    if sum(1 for c in items if c["name"] == name) > 1:
+        return False
+    save_collections(items)
+
+    # 同步素材引用
+    mats = load_materials()
+    changed = 0
+    for it in mats:
+        if (it.get("collection") or "").strip() == old_name:
+            it["collection"] = name
+            changed += 1
+    if changed:
+        save_materials(mats)
+    return True
+
+
+def delete_collection(name: str, clear_refs: bool = True) -> bool:
+    """删除合集。clear_refs=True 时同时清掉素材上的引用，避免出现指向已删合集的脏数据。"""
+    n = (name or "").strip()
+    items = load_collections()
+    new = [c for c in items if c["name"] != n]
+    if len(new) == len(items):
+        return False
+    save_collections(new)
+    if clear_refs:
+        mats = load_materials()
+        ch = 0
+        for it in mats:
+            if (it.get("collection") or "").strip() == n:
+                it["collection"] = ""
+                ch += 1
+        if ch:
+            save_materials(mats)
+    return True
+
+
+def collection_counts(account_id: str | None = None) -> dict:
+    """合集 → 素材数（用于素材库筛选时显示数量）。"""
+    out = {}
+    for it in load_materials(account_id):
+        c = (it.get("collection") or "").strip()
+        if c:
+            out[c] = out.get(c, 0) + 1
+    return out
+
+
 # 官方限制提示
 LIMITS = {"desc_max": 1000, "short_title": (6, 16), "video_max_gb": 4, "video_max_hours": 2}
 
 # 新素材允许写入/更新的全部字段
 _FIELDS = (
-    "title", "short_title", "desc", "tags", "labels", "video_path", "cover_path", "status",
+    "title", "short_title", "desc", "tags", "labels", "collection", "video_path",
+    "cover_path", "status",
     "ai_declare", "original", "original_cat", "visibility",
     "allow_download", "allow_comment", "scheduled_at", "ext_link", "location",
 )
@@ -84,6 +205,7 @@ def add_material(data: dict, account_id: str | None = None) -> dict:
         "tags": data.get("tags", ""),
         # 分类标签（内部管理用，不会发布出去）
         "labels": labels_str(data.get("labels", "")),
+        "collection": (data.get("collection") or "").strip(),
         "video_path": data.get("video_path", ""),
         "cover_path": data.get("cover_path", ""),
         "status": data.get("status", "待发布"),

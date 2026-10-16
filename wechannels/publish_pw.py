@@ -232,6 +232,78 @@ def _fill_form_item(frame, label: str, value: str) -> bool:
         return False
 
 
+def _select_collection(frame, name: str) -> bool:
+    """在发表页选择合集。
+
+    合集是**下拉选择器**而非输入框，实现要点：
+    1. 先点开「合集」那一栏（有些版本默认收起，不点开找不到选项）
+    2. 在弹层/下拉列表里按文本匹配合集名
+    3. 点中后确认选中态（避免"点了没生效"被当成成功）
+
+    ⚠️ 前提：合集必须**已存在于该视频号后台**。不存在时这里一定会失败，
+    调用方要把它记入 unset_fields 如实告知用户——绝不假装选中了。
+    """
+    if not name:
+        return False
+    js_open = """
+    (name) => {
+      const items = Array.from(document.querySelectorAll('.form-item, div[class*=form-item]'));
+      for (const it of items) {
+        const lab = it.querySelector('.label');
+        if (!lab || !lab.innerText || !lab.innerText.includes('合集')) continue;
+        // 点开下拉：优先点选择器，其次点整行
+        const sel = it.querySelector('[class*=select], .weui-desktop-form__select, input');
+        const target = sel || it;
+        target.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
+        target.dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));
+        target.click && target.click();
+        return true;
+      }
+      return false;
+    }
+    """
+    js_pick = """
+    (name) => {
+      // 在所有可见的下拉/弹层里找文本等于合集名的选项
+      const cands = Array.from(document.querySelectorAll(
+        '[role=option], li, .weui-desktop-dropdown__list li, [class*=dropdown] li, [class*=option]'));
+      for (const c of cands) {
+        const t = (c.innerText || '').trim();
+        if (!t) continue;
+        if (t === name || t.replace(/\\s+/g, ' ') === name) {
+          c.scrollIntoView({block:'center'});
+          c.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
+          c.dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));
+          c.click && c.click();
+          return true;
+        }
+      }
+      return false;
+    }
+    """
+    try:
+        frame.evaluate(js_open, name)
+        _sleep(1)
+        if not frame.evaluate(js_pick, name):
+            return False
+        _sleep(1)
+        # 验证：合集那一栏的文本里应能看到合集名（确认真的选中了）
+        js_verify = """
+        (name) => {
+          const items = Array.from(document.querySelectorAll('.form-item, div[class*=form-item]'));
+          for (const it of items) {
+            const lab = it.querySelector('.label');
+            if (!lab || !lab.innerText || !lab.innerText.includes('合集')) continue;
+            return (it.innerText || '').includes(name);
+          }
+          return false;
+        }
+        """
+        return bool(frame.evaluate(js_verify, name))
+    except Exception:
+        return False
+
+
 def format_short_title(short: str) -> str:
     """把短标题规整成平台接受的 7-15 字。
 
@@ -565,6 +637,18 @@ def publish_deterministic(acc: dict, mat: dict, overrides: dict | None = None) -
                     unset_fields.append("自定义封面")
             elif cover_path:
                 unset_fields.append(f"自定义封面（文件不存在：{cover_path}）")
+
+            # 8.5) 合集（可选）。合集必须已存在于视频号后台，
+            # 不存在时这里必然失败 → 如实记入 unset_fields，不假装成功。
+            collection = pick("collection")
+            if collection:
+                if _select_collection(frame, collection):
+                    print(f"[INFO] 已归入合集：{collection}")
+                else:
+                    unset_fields.append(
+                        f"合集「{collection}」（该合集可能未在视频号后台创建，"
+                        f"或发表页改名了；请到「合集管理」核对名称）"
+                    )
 
             # 9) 点发表
             clicked = frame.evaluate(

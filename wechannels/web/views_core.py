@@ -25,6 +25,7 @@ def index():
     label_filter = request.args.get("label", "")
     q = request.args.get("q", "")
     sort = request.args.get("sort", "new")
+    coll_f = request.args.get("collection", "")
 
     # 批量上传结果提示：如实说清"入库几个、跳过几个"，否则用户会以为失败
     flash = ""
@@ -44,6 +45,8 @@ def index():
         items = [it for it in items if it.get("status") == sf]
     if label_filter:
         items = materials.filter_by_label(items, label_filter)
+    if coll_f:
+        items = [it for it in items if (it.get("collection") or "").strip() == coll_f]
     if q:
         items = [it for it in items if _match(it, q)]
 
@@ -65,6 +68,9 @@ def index():
         items=[decorate(m) for m in items],
         sf=sf, label_filter=label_filter, q=q, sort=sort,
         all_label_names=[n for n, _ in materials.all_labels(aid)],
+        collections=materials.load_collections(),
+        coll_counts=materials.collection_counts(aid),
+        collection_filter=coll_f,
         flash=flash,
         title="素材库",
     )
@@ -152,6 +158,58 @@ def materials_batch_upload():
     return redirect(url_for("index", msg=msg))
 
 
+@app.route("/collections")
+def collections_page():
+    """合集管理：维护「已存在的合集名称清单」。
+
+    ⚠️ 平台约束：视频号合集必须先在**视频号后台**创建，本工具只管理清单，
+    发布时在发表页搜到并选中。名字必须与后台完全一致，否则选不中。
+    """
+    msg = ""
+    m = request.args.get("msg", "")
+    if m == "ok":
+        msg = '<div class="msg ok">合集已添加</div>'
+    elif m == "dup":
+        msg = '<div class="msg bad">同名合集已存在，请直接选它</div>'
+    elif m == "renamed":
+        msg = '<div class="msg ok">已重命名，素材上的引用同步更新</div>'
+    elif m == "del":
+        msg = '<div class="msg ok">已删除；引用它的素材已清空合集（素材本身保留）</div>'
+    elif m == "err":
+        msg = '<div class="msg bad">操作失败，请检查是否重名</div>'
+
+    return render_template(
+        "collections.html",
+        cols=materials.load_collections(),
+        counts=materials.collection_counts(accounts.current_account_id()),
+        msg=msg,
+        title="合集管理",
+    )
+
+
+@app.route("/collections/add", methods=["POST"])
+def collections_add():
+    name = request.form.get("name", "")
+    if not materials.add_collection(name, request.form.get("desc", "")):
+        return redirect(url_for("collections_page", msg="dup" if name.strip() else "err"))
+    return redirect(url_for("collections_page", msg="ok"))
+
+
+@app.route("/collections/rename", methods=["POST"])
+def collections_rename():
+    ok = materials.update_collection(
+        request.form.get("old", ""), request.form.get("name", ""),
+        request.form.get("desc", ""),
+    )
+    return redirect(url_for("collections_page", msg="renamed" if ok else "err"))
+
+
+@app.route("/collections/delete", methods=["POST"])
+def collections_delete():
+    materials.delete_collection(request.form.get("name", ""))
+    return redirect(url_for("collections_page", msg="del"))
+
+
 @app.route("/library/heal")
 def library_heal():
     """路径自愈：视频文件被移动/改名后，自动把素材指回新位置。
@@ -180,21 +238,32 @@ def new_material():
 
 @app.route("/materials/autofill")
 def materials_autofill():
-    """AI 智能填写：按字段生成标题/短标题/描述/话题/AI标注。
+    """AI 智能填写：生成文案字段。
+
+    field 为空 → 一次返回全部字段（title/short_title/desc/tags/ai_declare），
+                 供「一键生成全部」按钮使用；
+    field 有值 → 只返回该字段，形如 {"value": "..."}，供单个 ✨ 按钮使用。
 
     内部已做兜底：未配 Key 或调用失败时自动退回本地规则，不会卡住用户。
     """
     from .. import autofill
 
-    field = request.args.get("field", "title")
-    base = request.args.get("base", "")
-    hint = request.args.get("hint", "")
+    field = (request.args.get("field", "") or "").strip()
+    base = (request.args.get("base", "") or "").strip()
+    hint = (request.args.get("hint", "") or "").strip()
+
+    # 路径输入时只取文件名喂给 AI —— 否则会生成「d:/videos/xxx.mp4」这种垃圾标题
+    if base and ("/" in base or "\\" in base):
+        base = base.replace("\\", "/").split("/")[-1]
+
     try:
-        data = autofill.autofill(name=base, hint=hint, field=field)
+        data = autofill.autofill(name=base, hint=hint, field=field) or {}
     except Exception as e:
+        print(f"[WARN] AI 填写异常（{field or 'all'}）：{str(e)[:80]}")
         data = {}
-        print(f"[WARN] AI 填写异常（{field}）：{str(e)[:80]}")
-    return json.dumps({"value": (data or {}).get(field, "")}, ensure_ascii=False)
+    if field:
+        return json.dumps({"value": data.get(field, "")}, ensure_ascii=False)
+    return json.dumps(data, ensure_ascii=False)
 
 
 @app.route("/materials/<mid>/edit", methods=["GET", "POST"])
@@ -216,6 +285,9 @@ def edit_material(mid):
         ai_opts=[v for v in materials.AI_DECLARE_OPTIONS if v != "非AI内容"],
         vis_opts=materials.VISIBILITY_OPTIONS,
         login_badge=login_badge_html(m.get("account_id", "")),
+        collections=materials.load_collections(),
+        all_collections=materials.collection_names(),
+        all_label_names=[n for n, _ in materials.all_labels(m.get("account_id", ""))],
         title="编辑素材",
     )
 

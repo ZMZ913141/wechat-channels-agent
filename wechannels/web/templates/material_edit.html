@@ -45,6 +45,20 @@
     <input name="labels" id="f_labels" value="{{ m.labels_list|join(",") }}" placeholder="待剪辑,爆款,双十一" list="dl_labels_e">
     <datalist id="dl_labels_e">{% for n in all_label_names %}<option value="{{ n }}">{% endfor %}</datalist>
     <div class="mtags" style="margin-top:8px">{% for lb in m.labels_list %}<a class="lchip" href="/?label={{ lb|urlencode }}">{{ lb }}</a>{% endfor %}</div>
+    <label style="margin-top:14px">合集 <span class="muted">（发布时自动归入；需先在视频号后台建好同名合集）</span>
+      <a class="genbtn" href="/collections" target="_blank" style="margin-left:6px">管理合集</a></label>
+    <select name="collection">
+      <option value="">不归入合集</option>
+      {% for c in collections %}
+      <option value="{{ c.name }}"{{ ' selected' if m.collection == c.name else '' }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+    {% if m.collection and m.collection not in all_collections %}
+    <div class="warnbox" style="margin-top:6px">
+      ⚠ 本素材指向的合集「{{ m.collection }}」不在合集清单里（可能已被删除），
+      请到<a href="/collections" target="_blank">合集管理</a>重新登记，否则发布时选不中。
+    </div>
+    {% endif %}
   </div>
 
   <div class="card">

@@ -43,6 +43,7 @@
         <form method="get" action="/" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <input type="hidden" name="status" value="{{ sf }}">
           <input type="hidden" name="label" value="{{ label_filter }}">
+          {% if collection_filter %}<input type="hidden" name="collection" value="{{ collection_filter }}">{% endif %}
           <input name="q" value="{{ q }}" placeholder="🔍 搜索标题 / 文案 / 标签…">
           <select name="sort">
             <option value="new"{{ ' selected' if sort == 'new' else '' }}>最新创建</option>
@@ -69,6 +70,19 @@
         <a class="mini" href="javascript:void(0)" onclick="toggleSelect(true)">全选</a>
         <a class="mini" href="javascript:void(0)" onclick="toggleSelect(false)">取消全选</a>
       </div>
+
+      {% if collections %}
+      <div class="labelbar">
+        <span class="muted" style="font-size:12px">合集</span>
+        <a class="lchip{{ ' on' if not collection_filter else '' }}" href="/?collection={{ '' }}">全部</a>
+        {% for c in collections %}
+        <a class="lchip{{ ' on' if collection_filter == c.name else '' }}"
+           href="/?collection={{ c.name|urlencode }}">
+          📚 {{ c.name }}<span class="cn">{{ coll_counts.get(c.name, 0) }}</span></a>
+        {% endfor %}
+        <a class="lchip" href="/collections" target="_blank" style="margin-left:auto">管理合集 →</a>
+      </div>
+      {% endif %}
 
       {{ label_cloud(cur_account_id, label_filter)|safe }}
       {% if items %}

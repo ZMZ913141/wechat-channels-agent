@@ -67,6 +67,17 @@ def accounts_page():
         msg = ('<div class="msg ok">已打开扫码窗口（新弹出的控制台窗口有操作提示）。'
                '用微信扫描页面二维码并确认，控制台出现「登录成功」即可。'
                '完成后<b>关闭浏览器窗口</b>，登录态就保存好了。</div>')
+    elif m == "lastacct":
+        msg = ('<div class="msg bad">不能删除最后一个账号——'
+               '删掉后面板就没有可用的视频号了。'
+               '如果只是想换一个，请先「新增」另一个账号再删这个。</div>')
+    elif m.startswith("del:"):
+        nm = m.split(":", 1)[1]
+        msg = (f'<div class="msg ok">已删除账号「{html.escape(nm)}」。'
+               '浏览器档案目录已保留；若以后重建同名账号，'
+               '原来的登录态可能还能用。</div>')
+    elif m == "nodup":
+        msg = '<div class="msg bad">该账号不存在，可能已被删除。</div>'
     elif m.startswith("probe:"):
         tip = m[6:]
         cls = "ok" if tip.startswith("已登录") else "bad"
@@ -192,10 +203,23 @@ def accounts_set_current(aid):
     return redirect(url_for("index"))
 
 
-@app.route("/accounts/<aid>/delete")
+@app.route("/accounts/<aid>/delete", methods=["POST"])
 def accounts_delete(aid):
+    """删除账号。
+
+    ⚠️ 必须 POST：删账号的代价最高——浏览器档案里的登录态一起没了，
+    要重新扫码。用 GET 的话链接预览/预取就可能把账号删了。
+    另外：最后一个账号不允许删，否则面板进入无账号的死状态。
+    """
+    acc = accounts.get_account(aid)
+    if not acc:
+        return redirect(url_for("accounts_page", msg="nodup"))
+    if len(accounts.load_accounts()) <= 1:
+        return redirect(url_for(
+            "accounts_page",
+            msg="lastacct"))   # 模板会渲染成醒目警告
     accounts.delete_account(aid)
-    return redirect(url_for("accounts_page"))
+    return redirect(url_for("accounts_page", msg="del:" + aid))
 
 
 @app.route("/open_publish")

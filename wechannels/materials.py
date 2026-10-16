@@ -66,8 +66,7 @@ def load_collections() -> list:
 
 
 def save_collections(items: list) -> None:
-    with open(_collections_path(), "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=2)
+    config.save_json_atomic(_collections_path(), items, ensure_ascii=False)
 
 
 def collection_names() -> list:
@@ -187,9 +186,20 @@ def load_materials(account_id: str | None = None) -> list:
 
 
 def save_materials(items: list) -> None:
+    """原子写入素材库。
+
+    ⚠️ **必须原子写**，这是实测踩过的坑：
+    用 `open(path,"w")` 会**先清空文件再写**。并发场景下（比如批量操作
+    与后台任务同时进行）其他线程正好在"清空"与"写完"之间读文件，
+    就会读到空内容 → json 解析报"Expecting value: line 1 column 1"，
+    极端情况下还会把空数据当成"素材全没了"再保存回去，造成真实丢失。
+
+    正确做法：写临时文件 → flush+fsync 落盘 → os.replace 原子替换。
+    os.replace 在同一文件系统内是原子操作，读方永远只能看到
+    "完整的旧内容"或"完整的新内容"，不存在中间态。
+    """
     os.makedirs(config.STATE_DIR, exist_ok=True)
-    with open(_path(), "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=2)
+    config.save_json_atomic(_path(), items, ensure_ascii=False)
 
 
 def add_material(data: dict, account_id: str | None = None) -> dict:

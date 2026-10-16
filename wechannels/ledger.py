@@ -82,11 +82,7 @@ def load_batches() -> list:
 
 def save_batches(items: list) -> None:
     """原子写：先写临时文件再replace，避免看板读到半个文件。"""
-    p = _path()
-    tmp = p + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, p)
+    config.save_json_atomic(_path(), items, ensure_ascii=False)
 
 
 def new_batch(material: dict, account_ids: list, overrides: dict | None = None,

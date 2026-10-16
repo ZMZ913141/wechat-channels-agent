@@ -4,12 +4,15 @@ import json
 import os
 import subprocess
 import sys
+import time
+import urllib.parse
 import uuid
 
 from flask import redirect, render_template, request, url_for
 
 from .. import (accounts, backup, config, ledger, login_state, materials,
                  media_probe, proclock)
+from . import exporters
 from .base import app, BASE_DIR
 from .templating import decorate
 
@@ -84,6 +87,29 @@ def index():
     start = (page - 1) * per_page
     page_items = items[start:start + per_page]
 
+    # ---- 为当前页批量抽首帧图 ----
+    # 只处理本页（不是全库）：1000 条素材时全量抽帧要几分钟，
+    # 而用户翻到第 1 页根本不需要后面的图。抽不出来的自动回退 <video>。
+    try:
+        from .. import thumbs as _thumbs
+        _t0 = time.time()
+        n_ok = 0
+        for _m in page_items:
+            vp = (_m.get("video_path") or "").strip()
+            # 有自定义封面的不需要抽
+            if not vp or not os.path.exists(vp) or (_m.get("cover_path") or "").strip():
+                continue
+            t = _thumbs.extract(vp)
+            if t:
+                _m["_thumb"] = t
+                n_ok += 1
+        # 只在真的新抽了帧时才打印，避免每次翻页都刷屏
+        if n_ok > 0 and time.time() - _t0 > 0.5:
+            print(f"[INFO] 首帧图就绪 {n_ok}/{len(page_items)}"
+                  f"（{time.time() - _t0:.1f}s）")
+    except Exception as e:
+        print(f"[WARN] 首帧图生成跳过（不影响使用）：{str(e)[:60]}")
+
     return render_template(
         "index.html",
         accounts=accounts.load_accounts(),
@@ -96,6 +122,14 @@ def index():
         # 分页上下文（切换筛选时靠它拼链接）
         page=page, pages=pages, per_page=per_page,
         total_shown=total, offset=start,
+        # 导出链接要带上当前筛选条件，做到「所见即所得」
+        qs_all=urllib.parse.urlencode({
+            k: v for k, v in (
+                ("q", q), ("label", label_filter),
+                ("collection", coll_f), ("status", sf),
+                ("account", aid),
+            ) if v
+        }),
         all_label_names=[n for n, _ in materials.all_labels(aid)],
         collections=materials.load_collections(),
         coll_counts=materials.collection_counts(aid),
@@ -185,6 +219,26 @@ def materials_batch_upload():
         # 只有一条时直接跳到编辑页，省得再手工填文案
         return redirect(url_for("edit_material", mid=added[0]["id"]))
     return redirect(url_for("index", msg=msg))
+
+
+@app.route("/library/export/<fmt>")
+def library_export(fmt):
+    """导出素材库。fmt = csv / json / txt
+
+    支持按当前筛选条件导出（关键词/标签/合集），所见即所得。
+    """
+    from . import exporters as _ex
+
+    aid = request.args.get("account", "") or None
+    kw = request.args.get("q", "")
+    lb = request.args.get("label", "")
+    cl = request.args.get("collection", "")
+    f = (fmt or "csv").lower()
+    if f == "json":
+        return _ex.export_json(aid, kw, lb, cl)
+    if f == "txt":
+        return _ex.export_text(aid, kw, cl)
+    return _ex.export_csv(aid, kw, lb, cl)
 
 
 @app.route("/backup")
@@ -336,7 +390,8 @@ def materials_autofill():
 def edit_material(mid):
     m = materials.get_material(mid)
     if not m:
-        return redirect(url_for("index"))
+        # 静默跳首页会让用户以为"编辑成功了"——必须明确告知
+        return redirect(url_for("index", msg=f"batch:0:素材 {mid[:8]} 不存在，可能已被删除"))
     if request.method == "POST":
         data = request.form.to_dict()
         _apply_uploads(data)
@@ -370,10 +425,20 @@ def upload_cover(mid):
     return redirect(url_for("edit_material", mid=mid))
 
 
-@app.route("/materials/<mid>/delete")
+@app.route("/materials/<mid>/delete", methods=["POST"])
 def delete_material_route(mid):
+    """删除素材。
+
+    ⚠️ 必须用 POST：删除是破坏性操作，若用 GET 则——
+      - 浏览器预取/预加载可能误触发
+      - 爬虫或聊天软件里的链接预览会顺手删掉你的素材
+      - URL 被缓存后刷新页面会再次删除
+    前端已改为表单提交 + confirm 二次确认。
+    """
+    if not materials.get_material(mid):
+        return redirect(url_for("index", msg=f"batch:0:素材 {mid[:8]} 不存在，可能已被删除"))
     materials.delete_material(mid)
-    return redirect(url_for("index"))
+    return redirect(url_for("index", msg="batch:1:已删除素材记录（视频文件未动）"))
 
 
 @app.route("/materials/batch", methods=["POST"])
@@ -421,6 +486,8 @@ def materials_batch():
 @app.route("/materials/<mid>/status")
 def status_route(mid):
     st = request.args.get("status", "")
+    if not materials.get_material(mid):
+        return redirect(url_for("index", msg=f"batch:0:素材 {mid[:8]} 不存在，可能已被删除"))
     if st in materials.STATUSES:
         materials.set_status(mid, st)
     return redirect(url_for("index"))
@@ -430,7 +497,7 @@ def status_route(mid):
 def clone_material_route(mid):
     src = materials.get_material(mid)
     if not src:
-        return redirect(url_for("index"))
+        return redirect(url_for("index", msg=f"batch:0:素材 {mid[:8]} 不存在，可能已被删除"))
     if request.method == "POST":
         target = request.form.get("target_account", "")
         if target and accounts.get_account(target):

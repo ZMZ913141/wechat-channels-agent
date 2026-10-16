@@ -127,12 +127,13 @@ def save_accounts(accounts: list) -> None:
 
     曾经踩过：账号 name 为空字符串 → 面板上显示成一行空白，
     且每次 load 才在内存里回退成 id、磁盘上一直是空的。
+
+    写入走 config.save_json_atomic（原子替换），
+    避免并发读写时读到半个 JSON。
     """
     os.makedirs(config.STATE_DIR, exist_ok=True)
     data = [_normalize_account(dict(a)) if isinstance(a, dict) else a for a in accounts]
-    with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
+    config.save_json_atomic(_path(), data, ensure_ascii=False)
 
 def get_account(aid: str) -> dict | None:
     for a in load_accounts():

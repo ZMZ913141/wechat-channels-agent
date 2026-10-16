@@ -26,8 +26,11 @@
     <a class="ghost btn" href="/accounts/{{ a.id }}/set_current">设为当前</a>
     {% endif %}
     <a class="ghost btn" href="/accounts/{{ a.id }}/resume">解除暂停</a>
-    <a class="ghost btn" href="/accounts/{{ a.id }}/delete"
-       onclick="return confirm('确认删除该账号？（只删配置，浏览器档案目录保留）')">删除</a>
+    {# 删除账号代价最高（登录态一起没了，要重新扫码），故用 POST + 二次确认 #}
+    <form method="post" action="/accounts/{{ a.id }}/delete" style="display:inline"
+          onsubmit="return confirm('确认删除账号「{{ a.name }}」？\n\n· 只删配置，浏览器档案目录会保留\n· 但下次要用它发布时，可能需要重新扫码登录')">
+      <button class="ghost btn" type="submit" style="color:var(--bad)">删除</button>
+    </form>
   </td>
 </tr>
 {% endfor %}

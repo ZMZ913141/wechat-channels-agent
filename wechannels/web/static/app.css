@@ -368,3 +368,51 @@ button.mini:hover,.mactions a.mini:hover{background:var(--elev);border-color:var
   background:color-mix(in srgb, var(--acc) 8%, var(--elev))}
 .bkitem .bkmeta{font-size:11.5px;color:var(--mut);
   font-family:ui-monospace,Menlo,Consolas,monospace}
+
+/* ===========================================================================
+   补齐模板里用到但从未定义的 class
+   —— 由「模板 class ↔ CSS 定义」双向grep 校验发现。
+   ⚠️ .pubgrid 缺失最严重：它是发布页的两栏布局骨架，
+      没有它发布页会退化成单列堆叠（看起来"能凑合"但明显不对）。
+   =========================================================================== */
+
+/* 页面主容器（限制最大宽度 + 居中） */
+.wrap{max-width:1180px;margin:0 auto;padding:0 14px;width:100%}
+@media (max-width:640px){.wrap{padding:0 10px}}
+
+/* 发布中心两栏：左预览、右表单 */
+.pubgrid{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);
+  gap:14px;align-items:start}
+@media (max-width:960px){.pubgrid{grid-template-columns:1fr}}
+.pubgrid>div{min-width:0}      /* 关键：允许内部收缩，否则视频会撑破网格 */
+
+/* 合规提示条（AI 标注法规提醒） */
+.law{margin:10px 0;padding:9px 12px;border-radius:8px;font-size:11.5px;
+  line-height:1.7;color:var(--warn);
+  background:color-mix(in srgb, var(--warn) 9%, transparent);
+  border:1px solid color-mix(in srgb, var(--warn) 30%, transparent)}
+
+/* 表单里的多选/勾选区 */
+.checks{display:flex;gap:14px;flex-wrap:wrap;align-items:center;
+  margin:6px 0 2px}
+.checks label{display:inline-flex;align-items:center;gap:5px;
+  font-size:12.5px;cursor:pointer;margin:0}
+
+/* 新建素材表单顶部的智能填写条 */
+.fillbar{align-items:flex-end}
+.fillbar label{margin-bottom:3px}
+
+/* 等宽字体（路径、ID、日志） */
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+
+/* 目录导入页的说明卡片 */
+.ways{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:12px;margin:12px 0}
+.way{background:var(--elev);border:1px solid var(--line);border-radius:10px;
+  padding:12px 14px}
+.way h4{margin:0 0 6px;font-size:13.5px;color:var(--acc)}
+.way p{margin:0;font-size:12px;color:var(--mut);line-height:1.75}
+.way ol,.way ul{margin:6px 0 0;padding-left:18px;font-size:12px;
+  color:var(--mut);line-height:1.85}
+
+.tagline{font-size:12.5px;color:var(--mut);line-height:1.8;margin:0 0 10px}

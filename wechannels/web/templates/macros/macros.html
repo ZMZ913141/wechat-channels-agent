@@ -44,8 +44,12 @@
       <a class="mini" href="/publish?material={{ m.id }}">发布</a>
       <a class="mini" href="/materials/{{ m.id }}/clone">复用</a>
       <a class="mini" href="/materials/{{ m.id }}/status?status=已发布">标已发</a>
-      <a class="mini danger" href="/materials/{{ m.id }}/delete"
-         onclick="return confirm('删除此素材？（只删记录，不动你的视频文件）')">删除</a>
+      {# 删除是破坏性操作 → 用 POST 提交，不用 GET 链接：
+         避免浏览器预取 / 爬虫 / 链接预览误触发删除 #}
+      <form method="post" action="/materials/{{ m.id }}/delete" style="display:inline"
+            onsubmit="return confirm('删除此素材「{{ m.title }}」？\n\n只删素材记录，你的视频文件不会被删除。')">
+        <button class="mini danger" type="submit" title="删除素材记录（不动视频文件）">删除</button>
+      </form>
     </div>
     <div class="mpath muted" title="{{ m.video_path or m.cover_path }}">
       {{ m.video_path or m.cover_path or '（未设置文件）' }}

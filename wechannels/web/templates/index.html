@@ -35,6 +35,12 @@
         {{ library_summary(cur_account_id)|safe }}
         <a class="btn ghost" style="margin-left:auto" href="/library/heal"
            title="视频被移动/改名后，自动把素材指回新位置（不丢文案与历史）">🔍 找回移动的视频</a>
+        <a class="btn ghost" href="/library/export/csv?{{ qs_all }}"
+           title="导出当前筛选结果为 CSV（Excel 可直接打开）">⬇ 导出 CSV</a>
+        <a class="btn ghost" href="/library/export/json?{{ qs_all }}"
+           title="导出完整 JSON（含全部字段，可迁移到其他工具）">⬇ JSON</a>
+        <a class="btn ghost" href="/library/export/txt?{{ qs_all }}"
+           title="只导出文案纯文本，方便喂给 AI 改写">⬇ 文案 TXT</a>
         <a class="btn ghost" href="/library/maintain"
            title="查重、清理文件丢失的素材、归档过期已发布素材">🧹 素材库维护</a>
       </div>

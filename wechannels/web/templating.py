@@ -156,7 +156,11 @@ def thumb_lazy(m: dict) -> str:
     video = (m.get("video_path") or "").strip()
     if cover and os.path.exists(cover):
         return (f'<img data-src="{media_url(cover)}" alt="" loading="lazy" decoding="async">')
+    # 优先用已抽好的首帧图（几十 KB），避免浏览器去读 100MB+ 的视频文件头
     if video and os.path.exists(video):
+        t = (m.get("_thumb") or "").strip()
+        if t and os.path.exists(t):
+            return (f'<img data-src="{media_url(t)}" alt="" loading="lazy" decoding="async">')
         return (f'<video data-src="{media_url(video)}" data-kind="video" muted playsinline '
                 f'onerror="this.parentNode.classList.add(\'noimg\')"></video>')
     return '<div class="nothumb">无预览</div>'

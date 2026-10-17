@@ -40,10 +40,46 @@
     if (!bar) return;
     bar.value = t;
     seekLabel();
+    // 高亮离 t 最近的那一帧，让"预览条 = 可选画面"的对应关系可见
+    var box = $('vprev');
+    if (!box) return;
+    var times = (box.getAttribute('data-times') || '').split(',')
+      .filter(function (x) { return x !== ''; })
+      .map(parseFloat);
+    if (!times.length) return;
+    var best = 0, bd = Infinity;
+    times.forEach(function (v, i) {
+      var d = Math.abs(v - t);
+      if (d < bd) { bd = d; best = i; }
+    });
+    highlightFrame(best);
   };
 
   function setPrev(el, html) {
     if (el) el.innerHTML = html;
+  }
+
+  /* 竖版视频（高>宽）要按真实宽高比收窄容器，
+     否则宽容器里只放中间一条竖片，两侧全是刺眼的空白（用户截图标注的问题） */
+  function markOrientation(el, w, h) {
+    if (!el) return;
+    el.classList.remove('vp-portrait');
+    if (w > 0 && h > 0) {
+      var r = w / h;
+      el.style.setProperty('--vp-ratio', r.toFixed(4));
+      if (h > w) el.classList.add('vp-portrait');
+    }
+  }
+
+  /* 预览条：点某帧 → 跳到那个时间点，并高亮当前帧（反馈"我选的是哪一张"） */
+  function highlightFrame(idx) {
+    var box = document.getElementById('vprev');
+    if (!box) return;
+    var imgs = box.querySelectorAll('.vp-strip img');
+    for (var i = 0; i < imgs.length; i++) {
+      if (i === idx) imgs[i].classList.add('on');
+      else imgs[i].classList.remove('on');
+    }
   }
 
   /* ---------- 视频路径预览（服务端抽帧） ---------- */
@@ -70,22 +106,26 @@
           return;
         }
         state.duration = d.duration || 0;
+        markOrientation(prev, d.width, d.height);
         // 预览条：点某一张 → 把抓帧滑块跳到对应时间点
         // （用户直觉是"点哪张就抓哪张"，不做会让人以为预览条只是装饰）
         var pts = stripPoints(d);
         var strip = (d.frames || []).map(function (u, i) {
-          return '<img src="' + u + '" alt="第' + (pts[i] || 0).toFixed(1) +
-                 '秒" title="点此把抓帧位置移到 ' + (pts[i] || 0).toFixed(1) +
-                 ' 秒" onclick="jumpSeek(' + (pts[i] || 0) + ')">';
+          var t = pts[i] || 0;
+          return '<img src="' + u + '" alt="第' + t.toFixed(1) +
+                 '秒" title="点此把抓帧位置移到 ' + t.toFixed(1) +
+                 ' 秒" onclick="jumpSeek(' + t + ')">';
         }).join('');
+        var meta = [];
+        if (d.width) meta.push('<span>' + d.width + '×' + d.height + '</span>');
+        if (state.duration) meta.push('<span>' + state.duration.toFixed(1) + ' 秒</span>');
+        if (d.size_mb) meta.push('<span>' + d.size_mb + ' MB</span>');
+        meta.push('<span>' + (d.height > d.width ? '竖版' : '横版') + '</span>');
         setPrev(prev,
           '<div class="vp-main"><img src="' + d.main + '" alt=""></div>' +
           (strip ? '<div class="vp-strip">' + strip + '</div>' : '') +
-          '<div class="vp-meta">' +
-            (d.width ? d.width + '×' + d.height + ' · ' : '') +
-            (state.duration ? state.duration.toFixed(1) + ' 秒 · ' : '') +
-            (d.size_mb ? d.size_mb + ' MB' : '') +
-          '</div>');
+          '<div class="vp-meta">' + meta.join('') + '</div>');
+        prev.setAttribute('data-times', pts.join(','));
 
         // 显示抓帧工具
         var gb = $('grabbox');
@@ -114,6 +154,18 @@
     var mm = Math.floor(v / 60);
     var ss = (v - mm * 60).toFixed(1);
     $('seekVal').textContent = (mm > 0 ? mm + '分' : '') + ss + ' 秒';
+    // 拖滑块时同步高亮最近的关键帧（不跳时间，只改高亮）
+    var box = $('vprev');
+    if (!box) return;
+    var times = (box.getAttribute('data-times') || '').split(',')
+      .filter(function (x) { return x !== ''; }).map(parseFloat);
+    if (!times.length) return;
+    var best = 0, bd = Infinity;
+    times.forEach(function (x, i) {
+      var d = Math.abs(x - v);
+      if (d < bd) { bd = d; best = i; }
+    });
+    highlightFrame(best);
   };
 
   /* ---------- 抓帧当封面 ---------- */
@@ -139,9 +191,11 @@
         }
         // 抓帧后直接填入封面路径（同时保留手动上传能力）
         $('f_cpath').value = d.cover;
-        setPrev(cp, '<img src="' + d.url + '" alt="">' +
-          '<div class="vp-meta">✓ 已设为封面（第 ' +
-          parseFloat(d.at).toFixed(1) + ' 秒）</div>');
+        // 包一层 .vp-main，竖版封面才能按比例收窄、不裁切
+        cp.classList.remove('vp-portrait');
+        setPrev(cp, '<div class="vp-main"><img src="' + d.url + '" alt=""></div>' +
+          '<div class="vp-meta"><span>✓ 已设为封面</span>' +
+          '<span>第 ' + parseFloat(d.at).toFixed(1) + ' 秒</span></div>');
       })
       .catch(function () {
         setPrev(cp, '<div class="vp-err">抓取请求失败</div>');
@@ -169,9 +223,10 @@
       var prev = $('vprev');
       var url = URL.createObjectURL(f);
       setPrev(prev, '<div class="vp-main"><video src="' + url +
-        '" controls muted playsinline></video></div>' +
-        '<div class="vp-meta">✓ ' + escapeHtml(f.name) +
-        ' · ' + (f.size / 1048576).toFixed(1) + ' MB（保存后即可抓帧）</div>');
+        '" controls muted playsinline style="max-height:340px"></video></div>' +
+        '<div class="vp-meta"><span>✓ ' + escapeHtml(f.name) + '</span>' +
+        '<span>' + (f.size / 1048576).toFixed(1) + ' MB</span>' +
+        '<span>保存后即可抓帧</span></div>');
       // 已选了文件就不该再显示"抓帧"（此时服务端还没有这个文件）
       $('grabbox').style.display = 'none';
     });

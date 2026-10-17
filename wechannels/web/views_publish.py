@@ -1,10 +1,11 @@
 """发布中心：一条素材同步发到多个视频号。"""
 import html
 import json
+import time
 
-from flask import redirect, render_template, request, url_for
+from flask import jsonify, redirect, render_template, request, url_for
 
-from .. import accounts, config, materials, media_probe
+from .. import accounts, config, materials, media_probe, proclock
 from ..publish import JOB_FILE, read_job, start_publish_job
 from .base import app
 from .templating import decorate
@@ -42,6 +43,31 @@ def publish_page():
                 probe_html = (f'<div class="probe {cls}">视频规格：{res} · {dur} · {size_mb} MB'
                               f' · {info.get("fps", "?")}fps{extra}</div>')
 
+    # 发布前阻塞预检：账号被暂停 / 档案被占用 / 残留锁时**提前告知**。
+    # 否则用户点完只能等任务跑完才看到失败，体验上就是"点了没反应"。
+    # 返回 blocked_ids：只禁用受影响的账号勾选框，而不是一律禁用发布按钮
+    # （3 个号里 1 个被占用时，另外 2 个仍应能正常发布）。
+    blocked, blocked_ids = [], set()
+    for a in [x for x in accounts.load_accounts() if x.get("enabled", True)]:
+        aid = a["id"]
+        why = ""
+        p = proclock.paused(aid)
+        if p:
+            mins = max(1, int((p.get("until", 0) - time.time()) / 60) + 1)
+            why = (f'账号「{a.get("name") or aid}」正在手动操作中'
+                   f'（{p.get("reason", "被打开发表页")}），请约 {mins} 分钟后再发布')
+        else:
+            lock_path = proclock._task_lock_path(aid)
+            holder = proclock.read_file_lock(lock_path)
+            if holder and not proclock._pid_alive(holder.get("pid", 0)):
+                proclock._remove_if_mine(lock_path)   # 残留锁顺手清掉
+            elif holder:
+                why = (f'账号「{a.get("name") or aid}」正被 '
+                       f'{proclock.holder_desc(holder)} 占用，请等上一个任务结束')
+        if why:
+            blocked.append(why)
+            blocked_ids.add(aid)
+
     return render_template(
         "publish.html",
         mat=decorate(mat) if mat else None,
@@ -52,6 +78,10 @@ def publish_page():
         vis_opts=materials.VISIBILITY_OPTIONS,
         login_badge=login_badge_html,
         probe_html=probe_html,
+        blocked=blocked,
+        blocked_ids=sorted(blocked_ids),
+        usable_ids=[a["id"] for a in accounts.load_accounts()
+                    if a.get("enabled", True) and a["id"] not in blocked_ids],
         job=read_job(),
         collections=materials.load_collections(),
         all_collections=materials.collection_names(),
@@ -61,20 +91,34 @@ def publish_page():
 
 @app.route("/publish/status")
 def publish_status():
-    """发布任务进度（前端轮询）。"""
+    """发布任务进度（前端轮询）。
+
+    必须同时返回渲染好的 html：前端 refreshJob() 直接把 d.html 塞进
+    #jobwrap。之前只返回 JSON 字段，前端拿到 undefined → 任务区一片空白，
+    用户看到的就是"点了没反应"。
+    """
     job = read_job() or {}
-    return json.dumps({
-        "running": job.get("running", False),
+    frag = render_template("partials/job_status.html", job=job or None)
+    resp = jsonify({
+        "running": bool(job.get("running", False)),
         "accounts": job.get("accounts", []),
         "summary": job.get("summary", ""),
         "finished_at": job.get("finished_at", ""),
-    }, ensure_ascii=False)
+        "html": frag,
+    })
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/publish/start", methods=["POST"])
 def publish_start():
-    mids = request.form.getlist("material_ids")
-    acc_ids = request.form.getlist("accounts")
+    # 素材：发布页表单提交的是单选 <select name="material_id">，
+    # 但这里原本只读 material_ids（复数）→ 永远读不到，点了发布直接报
+    # 「请先选择要发布的素材」。两种名字都兼容，避免再被字段名不一致坑一次。
+    mids = (request.form.getlist("material_ids")
+            or ([request.form.get("material_id")] if request.form.get("material_id") else []))
+    mids = [m for m in mids if m]
+    acc_ids = [a for a in request.form.getlist("accounts") if a]
     overrides = {
         "short_title": (request.form.get("short_title") or "").strip(),
         "desc": (request.form.get("desc") or "").strip(),

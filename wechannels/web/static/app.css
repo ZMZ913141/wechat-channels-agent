@@ -159,6 +159,11 @@
 .accs{display:flex;flex-wrap:wrap;gap:10px;margin:6px 0}
 .accs label{display:inline-flex;align-items:center;gap:6px;background:var(--elev);
   border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:13px}
+/* 被占用/暂停的账号：明确置灰并标注，避免勾了才发现发不了 */
+.accs label.accblocked{opacity:.55;border-color:rgba(245,158,11,.4);
+  background:repeating-linear-gradient(45deg,var(--elev),var(--elev) 6px,transparent 6px,transparent 12px)}
+.accs label.accblocked .abadge.warn{background:rgba(245,158,11,.18);color:var(--warn);
+  font-size:10.5px;padding:1px 6px;border-radius:5px}
 /* 登录态圆点 */
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
 .dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}

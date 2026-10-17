@@ -1,4 +1,4 @@
-{# 发布任务进度。前端 publish.js 会轮询 /publish/status 刷新这个区域。 #}
+{# 发布任务进度。publish.html 内联的脚本会轮询 /publish/status 刷新这个区域。 #}
 {% if job %}
   {% if job.running %}
   <div class="msg">发布中…（逐号执行中，可切走继续做别的事，本页会自动刷新）</div>

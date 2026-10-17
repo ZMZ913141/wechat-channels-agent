@@ -3,6 +3,28 @@
 <head><meta charset="utf-8"><title>发布中心</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head><body>
 <h2>发布中心 <span class="muted">（仿官方发布页 1:1 字段 · 一条视频同步发多个视频号）</span></h2>
+{# 后端发布失败/成功会重定向带上 err / started 参数。
+   这两个提示原来**根本没在模板里渲染**，所以即使后端返回了
+   「请先选择要发布的素材」，页面看上去也毫无反应 —— 用户只能以为按钮坏了。 #}
+{# 发布前阻塞预检：账号被暂停/占用时提前告知，
+   免得用户点完等一分钟才看到失败，体验上就是"点了没反应" #}
+{% if blocked %}
+<div class="msg bad" id="pubblocked">
+  <b>⚠️ 有账号当前无法发布：</b>
+  <ul style="margin:6px 0 0 18px;padding:0">
+    {% for b in blocked %}<li>{{ b }}</li>{% endfor %}
+  </ul>
+  <div style="margin-top:5px">处理办法：关掉那个手动打开发表页的窗口，或到
+    <a href="/accounts">账号页</a>点「解除暂停」/「清理残留锁」，再回来发布。</div>
+</div>
+{% endif %}
+{% if request.args.get('err') %}
+<div class="msg bad" id="puberr">❌ {{ request.args.get('err') }}</div>
+{% endif %}
+{% if request.args.get('started') %}
+<div class="msg ok" id="pubok">✅ 已提交发布任务，正在执行（需 1-2 分钟）。
+  可切走继续做别的事，下方「最近一次发布任务」会自动刷新结果。</div>
+{% endif %}
 <p><a href="/">返回面板</a></p>
 <div class="card">
   <div class="pubgrid">
@@ -69,10 +91,13 @@
         <input name="ext_link" value="{{ (mat.ext_link or "") if mat else "" }}" placeholder="https://mp.weixin.qq.com/s/...">
         <label>选择要发布的账号（可多选，将按顺序逐号发布）</label>
         <div class="accs">{% for a in accounts %}
-<label title="{{ a.profile_dir }}"><input type="checkbox" name="accounts" value="{{ a.id }}"{{ ' checked' if a.id == cur_account_id else '' }}> {{ a.name or a.id }}（{{ a.id }}）{{ login_badge(a.id)|safe }}</label>
+<label title="{{ a.profile_dir }}"{% if a.id in blocked_ids %} class="accblocked"{% endif %}><input type="checkbox" name="accounts" value="{{ a.id }}"{{ ' checked' if a.id == cur_account_id and a.id not in blocked_ids }}> {{ a.name or a.id }}（{{ a.id }}）{% if a.id in blocked_ids %}<span class="abadge warn" title="该账号当前被占用或暂停，勾选后发布仍会失败">⚠ 暂不可用</span>{% endif %}{{ login_badge(a.id)|safe }}</label>
 {% endfor %}</div>
         <p class="muted">发布由确定性Playwright 直填表单完成（零token），以上配置会逐号自动动填写；默认有头浏览器可肉眼确认；发布期间对应账号的私信监控会暂停（文件锁互斥）。</p>
         <button class="btn" type="submit">开始同步发布</button>
+        {% if not usable_ids %}
+        <span class="muted" style="margin-left:8px">所有账号当前都被占用/暂停，已暂时禁用发布按钮</span>
+        {% endif %}
       </form>
     </div>
   </div>
@@ -83,6 +108,118 @@
 </div>
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='publish.js') }}"></script>
+{#
+  注意：这段逻辑原来放在 static/publish.js 里用 <script src> 引入。
+  但文件内容全是 Jinja2 语法（{{ }} / {% %}），静态文件**不会**经过模板渲染，
+  浏览器拿到的是原始模板源码 → 第一行就语法报错 → 整个脚本不执行
+  → 短标题校验、任务轮询、拖拽上传全部静默失效。
+  所以必须内联在模板里，让 Jinja 真正渲染。
+#}
+<script>
+/* 智能填写：字段 -> input id（发布页没有标题字段，留空即可） */
+var AF_MAP={{ {'title':'','short_title':'p_short','desc':'p_desc','tags':'p_tags','ai':''}|tojson }};
+AF_FALLBACK_NAME={{ (mat.title if mat else "")|tojson }};
+/* 生成后同步刷新左侧预览 */
+function afterAutofill(d){
+  var t=document.getElementById('pv_title'), s=document.getElementById('pv_desc');
+  if(t && d.short_title) t.textContent=d.short_title;
+  if(s && d.desc) s.textContent=d.desc;
+  checkShort();
+}
+
+// 短标题字数校验（平台要求 >= 6 字，少于 6 字会发布失败）
+function checkShort(){
+  var inp=document.getElementById('p_short');
+  var el=document.getElementById('st_count');
+  if(!inp || !el) return;
+  var v=inp.value.trim();
+  if(!v){ el.textContent=''; el.className='muted'; return; }
+  var n=v.length;
+  el.textContent = (n<6 ? '⚠️ 仅 '+n+' 字，平台要求≥6字，少于6字会发布失败' : '✅ '+n+' 字');
+  el.className = (n<6 ? 'bad' : 'ok');
+}
+checkShort();
+
+/* ---- AI 智能填充 ----
+   发布页原本直接 onclick="genField(...)"，但 genField 定义在
+   static/material_form.js 里，而发布页从未加载那个文件 →
+   点了「✨ AI填写」必然报 genField is not defined。
+   这里给出发布页自足的版本：按 AF_MAP 找到对应输入框即可。 */
+function afNote(msg){
+  var n=document.getElementById('af_note');
+  if(n){ n.textContent = msg || ''; n.className = 'muted';
+        n.style.fontSize = '12px'; n.style.minHeight = '16px'; }
+}
+function genField(field){
+  var id = AF_MAP[field];
+  var el = id ? document.getElementById(id) : null;
+  if(!el){ afNote('该字段不支持 AI 填充'); return; }
+  var base = AF_FALLBACK_NAME || '';
+  if(!base){ afNote('请先选择素材，AI 需要素材标题作为依据'); return; }
+  afNote('✨ 正在生成…');
+  var btns = document.querySelectorAll('.genbtn');
+  btns.forEach ? btns.forEach(function(b){b.disabled=true;})
+               : Array.prototype.forEach.call(btns, function(b){b.disabled=true;});
+  fetch('/materials/autofill?field=' + encodeURIComponent(field) +
+        '&base=' + encodeURIComponent(base))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.value){
+        el.value = d.value;
+        afNote('✨ 已生成');
+        if(typeof afterAutofill === 'function') afterAutofill(d);
+        if(el.id === 'p_short') checkShort();
+      } else afNote('AI 未返回内容，可重试或手写');
+    })
+    .catch(function(){ afNote('AI 调用失败，可手写'); })
+    .finally(function(){
+      Array.prototype.forEach.call(btns, function(b){b.disabled=false;});
+    });
+}
+
+/* ---- 发布任务自动刷新 ----
+   原实现只在页面加载时读一次 job.running 作为快照，点发布后不会变 true，
+   于是轮询压根没启动 → 用户看不到任何进度反馈，以为没反应。 */
+var _jobTimer = null;
+function refreshJob(){
+  fetch('/publish/status').then(function(r){return r.json()}).then(function(d){
+    var w=document.getElementById('jobwrap');
+    if(w) w.innerHTML=d.html;
+    var a=document.getElementById('autoref');
+    if(a) a.textContent = d.running ? '（运行中，自动刷新…）' : '';
+    if(!d.running && _jobTimer){ clearInterval(_jobTimer); _jobTimer=null; }
+  }).catch(function(){});
+}
+function startJobWatch(){
+  if(_jobTimer) return;
+  _jobTimer = setInterval(refreshJob, 3000);
+  refreshJob();
+}
+{% if job and job.running %}startJobWatch();{% endif %}
+
+/* 点发布后：立刻显示"已提交"并开始轮询。
+   浏览器跳转到 /publish?started=1 之前，这段先把反馈给出去，
+   否则发布要跑一两分钟，用户面对一个静止的页面。 */
+(function(){
+  var f=document.querySelector('form[action="/publish/start"]');
+  if(!f) return;
+  var blocked = {{ (usable_ids|length == 0)|tojson }};
+  if(blocked){
+    var b0=f.querySelector('button[type=submit]');
+    if(b0){ b0.disabled=true; b0.title='所有账号都被占用或暂停，请先处理上方提示'; }
+    return;
+  }
+  f.addEventListener('submit', function(){
+    var b=f.querySelector('button[type=submit]');
+    if(b){ b.disabled=true; b.textContent='正在提交…'; }
+    var w=document.getElementById('jobwrap');
+    if(w && !w.querySelector('.probe')){
+      w.innerHTML='<div class="msg">已提交，正在启动发布任务…'
+                + '（发布需 1-2 分钟，完成后本页会自动刷新结果）</div>';
+    }
+    startJobWatch();
+  });
+})();
+</script>
 {% endblock %}
 {% endblock %}

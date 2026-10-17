@@ -75,6 +75,11 @@
           <div class="vp-empty">填入路径或选择文件后，这里会显示视频画面</div>
           {% endif %}
         </div>
+        {# 时间窗档位：想只在前 2-4 秒里挑帧就点这里，不用拖长视频 #}
+        <div class="vpranges" id="vpranges" style="display:none"></div>
+        <div class="muted" style="font-size:11px;margin-top:4px">
+          点下方任意一帧可放大预览；确认后点「抓这一帧当封面」
+        </div>
         <input name="video_path" id="f_vpath" value="{{ m.video_path or "" }}"
                placeholder="或填本地路径 d:/videos/demo.mp4"
                oninput="syncName(this.value)"

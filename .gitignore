@@ -16,3 +16,6 @@ media/
 .vscode/
 .idea/
 .DS_Store
+
+# WorkBuddy 本地记忆
+.workbuddy/

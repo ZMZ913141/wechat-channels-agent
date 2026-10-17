@@ -240,9 +240,18 @@ def media_thumbs():
         return jsonify(ok=False, reason="文件不存在，请检查路径")
     try:
         dur = _th.probe_duration(path)
-        main = _th.extract(path, at_second=(dur * 0.3 if dur > 0 else 0.5),
-                           width=480)
-        strip = _th.preview_strip(path, 4)      # 返回的就是已抽好的路径列表
+        # 预览条：帧数与时间窗都可调（用户要能只看开头 2-4 秒的密集帧）
+        count = _int_arg("count", 6, 1, 24)
+        start = _float_arg("start", None)
+        end = _float_arg("end", None)
+        # 尾帧档位：默认整段；前端可传 end=4 得到"前 4 秒"密集帧
+        main_t = _float_arg("main_t", None)
+        if main_t is None:
+            main_t = (dur * 0.3 if dur > 0 else 0.5)
+        main = _th.extract(path, at_second=main_t, width=480)
+        strip = _th.preview_strip(path, count, start=start, end=end)
+        # 把实际时间点一并返回：前端不再自己复算取点规则，避免两边漂移
+        pts = _th.strip_points(count, dur, start, end)[:len(strip)]
         if not main:
             return jsonify(ok=False, reason="无法解码该视频（可能是不支持的编码）")
         try:
@@ -255,11 +264,56 @@ def media_thumbs():
             ok=True,
             main=_media_url(main),
             frames=[_media_url(f) for f in strip],
+            times=[round(t, 2) for t in pts],
+            main_t=round(main_t, 2),
             duration=round(dur, 2), width=w, height=h, size_mb=size_mb,
         )
     except Exception as e:
         print(f"[WARN] 抽帧预览失败：{str(e)[:70]}")
         return jsonify(ok=False, reason="读取失败")
+
+
+def _int_arg(name, default, lo, hi):
+    try:
+        return max(lo, min(int(request.args.get(name, default)), hi))
+    except (TypeError, ValueError):
+        return default
+
+
+def _float_arg(name, default):
+    v = request.args.get(name)
+    if v is None or v == "":
+        return default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+@app.route("/media/frame")
+def media_frame():
+    """抽**单帧**预览图（不落正式封面）。
+
+    与 /media/thumbs 的区别：这是"点某帧 → 大图换成那一帧"的即时反馈，
+    走 thumbs 缓存目录（可被定期清理），不会污染 media/ 里的正式封面。
+    """
+    from .. import thumbs as _th
+    path = (request.args.get("path", "") or "").strip()
+    if not path:
+        return jsonify(ok=False, reason="未提供路径")
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    if ext not in materials.VIDEO_EXTS:
+        return jsonify(ok=False, reason=f"不是视频文件（.{ext or '无扩展名'}）")
+    if not os.path.exists(path):
+        return jsonify(ok=False, reason="文件不存在，请检查路径")
+    t = _float_arg("t", 1.0)
+    dur = _th.probe_duration(path)
+    if dur > 0:
+        t = max(0.05, min(t, dur - 0.05))
+    out = _th.extract(path, at_second=t, width=720)
+    if not out:
+        return jsonify(ok=False, reason="该时间点抽帧失败")
+    return jsonify(ok=True, url=_media_url(out), at=round(t, 2))
 
 
 def _video_size(path: str):

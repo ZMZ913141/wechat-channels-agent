@@ -221,17 +221,42 @@ def _ffprobe_exe() -> str:
     return ""
 
 
-def preview_strip(video_path: str, count: int = 4) -> list:
-    """抽 count 帧（均匀分布）供表单预览条用。返回 [路径,...]，失败返回 []。"""
+def strip_points(count: int = 4, dur: float = 0.0,
+                 start: float = None, end: float = None) -> list:
+    """算预览条各帧的时间点。preview_strip 与前端共用这一份规则。
+
+    前端要靠它把「第 N 帧」对应回「第几秒」才能联动滑块，
+    所以必须只有一处实现，否则两边规则漂移会点错帧。
+    """
+    count = max(1, min(int(count or 4), 24))
+    lo = 0.0 if start is None else max(0.0, float(start))
+    hi = dur if end is None else float(end)
+    if dur > 0:
+        hi = min(hi, dur)
+    if hi <= lo:
+        lo, hi = 0.0, (dur if dur > 0 else 0.0)
+    if dur <= 0:
+        return [lo + 1.0 + (i * 2.0) for i in range(count)]
+    if count == 1:
+        return [lo + (hi - lo) * 0.5]
+    step = (hi - lo) / (count + 1)
+    return [lo + step * (i + 1) for i in range(count)]
+
+
+def preview_strip(video_path: str, count: int = 4,
+                  start: float = None, end: float = None) -> list:
+    """抽 count 帧供表单预览条用。返回 [路径,...]，失败返回 []。
+
+    start/end（可选）：只在 [start, end] 这段时间窗内均匀取点。
+    用户挑封面通常只关心开头几秒（人脸、正脸、表情最自然的那一帧），
+    全时长均匀抽样会全部落在中后段，选不到想要的那一帧。
+    """
     if not video_path or not os.path.exists(video_path):
         return []
     dur = probe_duration(video_path)
-    # 时长未知时退化为按固定秒数抽样（短视频常见）
-    points = ([1.0 + (i * 2.0) for i in range(count)] if dur <= 0
-              else [dur * (i + 1) / (count + 1) for i in range(count)])
     out = []
-    for t in points:
-        t = max(0.1, min(t, (dur or 999) - 0.1))
+    for t in strip_points(count, dur, start, end):
+        t = max(0.05, min(t, (dur - 0.05) if dur > 0 else t))
         p = extract(video_path, at_second=t, width=320)
         if p:
             out.append(p)

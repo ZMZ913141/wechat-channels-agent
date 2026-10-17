@@ -36,6 +36,7 @@ from playwright.sync_api import sync_playwright
 
 from . import accounts, config, proclock
 from .launcher import _launch as _launch_ctx
+from .launcher import _clear_stale_singleton_lock
 
 # 上传完成后表单出现的标志文本
 FORM_READY_MARKERS = ("视频描述", "短标题", "发表")
@@ -768,12 +769,28 @@ def publish_deterministic(acc: dict, mat: dict, overrides: dict | None = None) -
             f"该账号的浏览器档案正被 {proclock.holder_desc(_holder)} 占用，"
             "请先停止监控（或等手动窗口关闭）后重试"
         )
+    # 启动前清掉上次异常退出残留的浏览器锁（避免 Chromium 报 exitCode=21）
+    _cleared, _live = _clear_stale_singleton_lock(profile)
+    if _live:
+        proclock.release(profile)
+        return False, (
+            "该账号的浏览器档案正被另一个浏览器窗口占用，"
+            "请先关闭该账号已打开的浏览器窗口，再发起发布"
+        )
     with sync_playwright() as p:
         try:
             ctx, _ = _launch_ctx(p, profile, accounts.channel_of(acc),
                                 headless=bool(config.PUBLISH_HEADLESS))
         except Exception as e:
             proclock.release(profile)
+            msg = str(e)
+            if "exitCode=21" in msg or "profile" in msg.lower() \
+                    or "too new" in msg.lower() or "占用" in msg or "锁定" in msg:
+                return False, (
+                    "浏览器启动失败：该登录档案被比当前内核更新的浏览器写过"
+                    "（profile 版本不兼容），或仍被占用。请到「账号管理」把该账号内核"
+                    "设为「Microsoft Edge」，或关闭所有该账号窗口后重试"
+                )
             return False, f"浏览器启动失败（档案可能被其它进程占用）：{e}"
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         try:

@@ -8,6 +8,7 @@
 - 等待扫码登录成功并在控制台给出明确提示。
 """
 import os
+import subprocess
 import time
 
 from playwright.sync_api import sync_playwright
@@ -68,6 +69,82 @@ def _save_working_kernel(profile: str, channel: str) -> None:
             json.dump(d, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+
+def _cmd_uses_profile(cmd: str, target: str) -> bool:
+    """命令行是否真的使用了某档案目录（按路径边界匹配，避免 acc2 误中 acc22）。"""
+    cl = (cmd or "").lower().replace("/", "\\")
+    return (target == cl
+            or (target + "\\") in cl
+            or (target + " ") in cl
+            or (target + '"') in cl
+            or cl.endswith(target))
+
+
+def _profile_holder_pid(profile: str):
+    """是否有 chrome/edge 进程正占用该档案（命令行含 profile 路径）。
+
+    返回值：占用进程的 PID，或 None（没有 / 查不到）。
+
+    ⚠️ 这是 Chromium 自带 `SingletonLock` 之外的「软检测」：proclock 是应用层
+    锁，挡不住用户手动多开或上次进程被强杀。直接用进程命令行判断是否真有人
+    在用这个 user_data_dir，比解析 SingletonLock 文件格式可靠（实测 headless
+    下的 Chromium 根本不生成 SingletonLock 文件，纯靠文件判断会漏报）。
+    ⚠️ 必须按「路径边界」匹配，否则 `profiles/acc2` 会被 `profiles/acc22`
+    的前缀误当成被占用。
+    """
+    target = os.path.abspath(profile).lower().replace("/", "\\")
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-CimInstance Win32_Process -Filter "
+             "\"Name='msedge.exe' OR Name='chrome.exe' OR Name='headless_shell.exe'\" "
+             "| ForEach-Object { $_.ProcessId.ToString() + '|' + ($_.CommandLine) })"],
+            capture_output=True, text=True, timeout=20,
+        ).stdout
+    except Exception:
+        return None
+    for line in (out or "").splitlines():
+        if "|" not in line:
+            continue
+        pid, _, cmd = line.partition("|")
+        cl = (cmd or "").lower().replace("/", "\\")
+        # 边界匹配：整段相等 / 后接分隔符（反斜杠、空格、引号）或位于行尾
+        if _cmd_uses_profile(cmd, target):
+            try:
+                return int(pid)
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
+def _clear_stale_singleton_lock(profile: str):
+    """清理 Chromium 持久化档案残留的锁，并返回占用状态。
+
+    返回 (已清理, 检测到活占用)：
+      - (False, True)：确实有活进程在占用该档案 → **绝不**动锁（否则两个浏览器
+        同时写同一档案会损坏登录态），交由上层提示用户先关窗。
+      - (True, False)：没有活占用 → 删掉可能残留的 Singleton* 文件（覆盖
+        「上次进程被强杀 / 窗口已关但没清理」导致的启动失败，常表现为
+        exitCode=21 / 档案被占用）。
+      - (False, False)：没有活占用、也没有残留锁文件，无需处理。
+
+    ⚠️ 以「进程命令行扫描」为权威活占用信号（SingletonLock 文件在 headless
+    下不一定存在）；活锁一律不碰，避免双重打开同一档案。
+    """
+    holder = _profile_holder_pid(profile)
+    if holder and proclock._pid_alive(holder):
+        return (False, True)
+    removed = False
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        try:
+            os.remove(os.path.join(profile, name))
+            removed = True
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+    return (removed, False)
 
 
 def _launch(p, profile: str, channel: str | None = None, headless: bool = False):
@@ -233,14 +310,38 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
     try:
         with sync_playwright() as p:
             try:
+                # 启动前先清掉上次异常退出残留的浏览器锁（避免 Chromium 报
+                # exitCode=21「档案被占用」）。若真有活窗口占用则直接提示关窗。
+                cleared, live = _clear_stale_singleton_lock(profile)
+                if live:
+                    print(f"[ERROR] 该登录档案正被另一个浏览器进程（PID {_profile_holder_pid(profile)}）占用。")
+                    print("[HINT] 请先关闭该账号已打开的浏览器窗口，再点一次「打开发表页」。")
+                    _finish(fh)
+                    time.sleep(6)
+                    return
+                if cleared:
+                    print("[INFO] 已清理上次异常退出残留的浏览器锁，继续启动。")
+
                 ctx, used = _launch(p, profile, accounts.channel_of(acc))
             except Exception as e:
                 print(f"[ERROR] 浏览器启动失败：{e}")
-                print("[HINT] 可能原因：")
-                print("[HINT]   1) 该档案的浏览器窗口还开着 → 全部关掉再试")
-                print("[HINT]   2) 账号指定的浏览器内核没装 → 到「账号管理」改成已装的内核"
-                      "（如 msedge / chrome），或留空用内置 Chromium")
-                print("[HINT]   3) 档案目录被占用或无权限 → 关闭杀毒软件的文件占用提示后重试")
+                msg = str(e)
+                # exitCode=21 = Chromium 的 RESULT_CODE_PROFILE_TOO_NEW：
+                # 要么是「被比当前内核更新的浏览器写过」（版本不兼容），
+                # 要么是「档案正被占用」。两种都要给准话，而不是泛化的 3 条提示。
+                if "exitCode=21" in msg or "profile" in msg.lower() \
+                        or "too new" in msg.lower() or "锁定" in msg or "占用" in msg:
+                    print("[HINT] 该登录档案被比当前内核更新的浏览器写过（profile 版本不兼容），或仍被占用。")
+                    print("[HINT] 解决：① 关闭该账号所有已打开的浏览器窗口后重试；")
+                    print("[HINT]        ② 到「账号管理」把该账号内核设为「Microsoft Edge」"
+                          "（此档案即由 Edge 创建，兼容性最好）；")
+                    print("[HINT]        ③ 若仍失败，删除该账号档案目录后重新扫码登录。")
+                else:
+                    print("[HINT] 可能原因：")
+                    print("[HINT]   1) 该档案的浏览器窗口还开着 → 全部关掉再试")
+                    print("[HINT]   2) 账号指定的浏览器内核没装 → 到「账号管理」改成已装的内核"
+                          "（如 msedge / chrome），或留空用内置 Chromium")
+                    print("[HINT]   3) 档案目录被占用或无权限 → 关闭杀毒软件的文件占用提示后重试")
                 _finish(fh)
                 time.sleep(8)      # 让用户看清报错
                 return

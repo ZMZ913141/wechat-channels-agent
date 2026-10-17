@@ -11,15 +11,23 @@
 流程：上传 → 等表单 → 填描述/短标题 → 声明原创(默认勾) → 视频标注(AI) → 点发表。
 不依赖 LLM：更快、更稳、可离线；失败时由 publish.py 回退 browser-use Agent。
 
-## 本模块加固的四个点（2026-10，对齐 social-auto-upload 的实测经验）
+## 本模块加固的点（2026-10，对齐 social-auto-upload 的实测经验）
   1. **上传控件要遍历所有 frame**：视频号是无界(wujie)微前端，上传框在
      iframe 里，只查主 frame 永远找不到 → 这是「定位不到上传入口」的根因。
-  2. **上传必须有硬超时 + 重试上限 + 失败截图**：实测 172MB / 上行 0.5Mbps 时
-     会传到一半失败，若不设上限就会无限重传。
+  2. **上传必须有硬超时 + 失败截图**：实测 172MB / 上行 0.5Mbps 时会传到一半
+     失败，若不设上限就会无限重传。
   3. **成功判定不能看「已发布/审核中」**：这两个词在视频管理列表页普遍存在，
      会把「其实没发出去」误判成成功。改为只认「跳转到内容管理」或「发布成功」toast。
   4. **不能静默丢弃用户填的字段**：定时/封面/可见范围如果没真正生效，
      必须如实返回给用户，而不是假装成功。
+  5. **发表页入口必须是「首页 → 点发表视频」**：直接 goto /platform/post/create
+     会被跳回首页，表单 iframe 只挂空壳，页面上根本不存在 input[type=file]。
+  6. **登录态要在打开页面后立刻查**（login.html 跳转 / qrconnect iframe），
+     晚了才查就只报「未找到视频上传入口」这种完全不着边际的错。
+  7. **弹窗要主动处理**：「切换视频号」弹窗会挡住描述框和发表按钮；
+     「实名验证」弹窗能人工扫码放行，不该直接判失败。
+  8. **封面弹窗的确认只能点「确定/完成」，绝不能点「取消」**：页脚按钮顺序是
+     [取消][确定]，按 DOM 顺序取第一个匹配会把刚传好的封面整个作废。
 """
 import os
 import time
@@ -37,7 +45,77 @@ FORM_READY_MARKERS = ("视频描述", "短标题", "发表")
 SUCCESS_MARKERS = ("发布成功", "发表成功", "提交成功")
 # 页面跳到内容管理 = 视频确实进了列表（比任何文案都可靠）
 LIST_URL_MARK = "post/list"
-FAIL_MARKERS = ("需要安全验证", "验证码", "实名", "资质")
+FAIL_MARKERS = ("需要安全验证", "验证码", "资质")
+
+# 视频号首页 —— 发表页的正确入口（原因见 _open_post_page 的注释）
+HOME_URL = "https://channels.weixin.qq.com/platform"
+# cookie 失效的两个硬信号：前端 JS 跳转登录页 / 页面里出现微信扫码 iframe
+LOGIN_URL_MARK = "login.html"
+QRCONNECT_MARK = "open.weixin.qq.com/connect/qrconnect"
+# 管理员实名验证弹窗：可以人工扫码放行，值得等一会儿（秒）
+VERIFY_WAIT_S = 180
+
+# 「切换视频号」弹窗：上传后偶发出现，会挡住描述框和「发表」按钮
+_DISMISS_SWITCH_ACCOUNT_JS = """(() => {
+  const dlg = document.querySelector('.changeAccount-dialog');
+  if (!dlg) return '';
+  const cands = Array.from(dlg.querySelectorAll('button, [class*=close]'));
+  // 第一遍只认明确的「取消 / 关闭」文案，避免误点到别的按钮
+  for (const b of cands) {
+    const t = (b.innerText || '').trim();
+    if (t === '取消' || t === '关闭') { b.click(); return t; }
+  }
+  // 第二遍才是右上角 ×
+  for (const b of cands) {
+    if (/close/.test(b.className || '')) { b.click(); return 'close'; }
+  }
+  return '';
+})()"""
+
+# 封面弹窗的「确认」按钮。⚠️ 只认肯定性文案，绝不能匹配「取消」——
+# 弹窗页脚是 [取消][确定]，按 DOM 顺序取第一个匹配会把刚传好的封面作废。
+_COVER_CONFIRM_JS = """(() => {
+  const scopes = ['.weui-desktop-dialog__ft', '.weui-desktop-dialog', ''];
+  for (const s of scopes) {
+    const roots = s ? Array.from(document.querySelectorAll(s)) : [document];
+    for (const root of roots) {
+      for (const b of Array.from(root.querySelectorAll('button,a,div[class*=btn]'))) {
+        const t = (b.innerText || '').trim();
+        if (/^(确认|确定|完成|保存)$/.test(t) && b.offsetParent) { b.click(); return t; }
+      }
+    }
+  }
+  return '';
+})()"""
+
+# 部分版本上传封面后会再弹「裁剪封面图」，需要额外确认一次
+_COVER_CROP_JS = """(() => {
+  const ds = Array.from(document.querySelectorAll('div.weui-desktop-dialog'));
+  for (const d of ds) {
+    if (!(d.innerText || '').includes('裁剪')) continue;
+    for (const b of Array.from(d.querySelectorAll('button'))) {
+      const t = (b.innerText || '').trim();
+      if (/^(确定|确认|完成)$/.test(t) && b.offsetParent) { b.click(); return t; }
+    }
+  }
+  return '';
+})()"""
+
+_COVER_OPEN_JS = """(() => {
+  const wraps = Array.from(document.querySelectorAll(
+    'div[class*=cover-wrap], div[class*=cover], div[class*=thumb]'));
+  for (const e of wraps) {
+    const t = (e.innerText || '').trim();
+    if (/封面|4:3|3:4/.test(t) && e.offsetParent) { e.click(); return t.slice(0, 20); }
+  }
+  const els = Array.from(document.querySelectorAll(
+    'button,div[class*=btn],span,div[class*=cover],div[class*=item]'));
+  for (const e of els) {
+    const t = (e.innerText || '').trim();
+    if (t && t.length <= 8 && /封面/.test(t) && e.offsetParent) { e.click(); return t; }
+  }
+  return '';
+})()"""
 
 
 class PublishFlowError(Exception):
@@ -69,6 +147,143 @@ def _shot(page, tag: str) -> str:
         return ""
 
 
+def _check_login_state(page, timeout_s: int = 8) -> tuple[bool, str]:
+    """判断当前登录态是否还有效。返回 (有效, 失效原因)。
+
+    为什么必须在「打开页面后立刻」查，而不是等找不到上传框再说：
+    cookie 失效时页面会先停在 post/create，随后才由前端 JS 跳到登录页。
+    查晚了，用户看到的是「未找到视频上传入口」这种完全不着边际的报错，
+    真相却只是要重新扫码。
+    """
+    try:
+        page.wait_for_url(f"**/{LOGIN_URL_MARK}**", timeout=timeout_s * 1000)
+        return False, "页面被跳转到登录页"
+    except Exception:
+        pass
+    try:
+        for fr in page.frames:
+            if QRCONNECT_MARK in (fr.url or ""):
+                return False, "页面出现微信扫码登录框"
+    except Exception:
+        pass
+    return True, ""
+
+
+def _dismiss_switch_account_dialog(page, frame=None) -> bool:
+    """关掉「切换视频号」弹窗。
+
+    上传完成后偶发弹出（.changeAccount-dialog），会挡住描述框和「发表」按钮，
+    表现为「点不动 / 填不进去」，从日志看完全像页面卡死。它带「取消」按钮、
+    非强制，取消掉就能用当前账号继续发。
+
+    frame 可选：发表表单在 iframe 里，弹窗可能渲染在子 frame 而非主 frame，
+    两边都试一遍。
+    """
+    for scope in ((page, frame) if frame is not None else (page,)):
+        try:
+            if scope.evaluate(_DISMISS_SWITCH_ACCOUNT_JS):
+                _sleep(0.6)
+                return True
+        except Exception:
+            pass
+    try:
+        page.keyboard.press("Escape")
+        _sleep(0.4)
+    except Exception:
+        pass
+    return False
+
+
+def _open_post_page(page) -> None:
+    """打开发表页 —— 必须先落首页再点「发表视频」。
+
+    ⚠️ 踩过的坑（对齐 social-auto-upload 的实测结论）：直接全页 goto
+    /platform/post/create 会被跳回 /platform 首页，发表表单所在的 iframe
+    只加载一个空壳（Vue 根本不挂载），页面上**不存在任何 input[type=file]**。
+    正确入口是先进首页、再点可见的「发表视频」按钮做客户端跳转，表单才真正挂载。
+    """
+    page.goto(HOME_URL, wait_until="domcontentloaded", timeout=120000)
+    ok, why = _check_login_state(page, timeout_s=8)
+    if not ok:
+        raise PublishFlowError(f"账号登录态已失效（{why}），请重新扫码登录后再发布")
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
+
+    # 真正可点的入口是 button.weui-desktop-btn；
+    # 按文本匹配会先命中一个隐藏的说明 <p>（不可点）。
+    clicked = False
+    try:
+        btn = page.locator("button.weui-desktop-btn", has_text="发表视频").first
+        btn.wait_for(state="visible", timeout=30000)
+        btn.click()
+        clicked = True
+    except Exception:
+        try:
+            clicked = bool(page.evaluate(
+                "(()=>{const bs=Array.from(document.querySelectorAll('button'));"
+                "for(const b of bs){if((b.innerText||'').includes('发表视频')"
+                "&&b.offsetParent){b.click();return true;}}return false;})()"
+            ))
+        except Exception:
+            pass
+    if not clicked:
+        # 兜底：退回老逻辑直接跳转（可能仍是空壳，但保持向后兼容）
+        page.goto(config.PUBLISH_URL, wait_until="domcontentloaded", timeout=120000)
+    try:
+        page.wait_for_url("**/platform/post/create", timeout=120000)
+    except Exception:
+        pass
+    # iframe 在 domcontentloaded 时还是空的，不等网络静默就去找 file input，
+    # 会误报「未找到视频号文件上传框」
+    try:
+        page.wait_for_load_state("networkidle", timeout=30000)
+    except Exception:
+        pass
+
+
+def _wait_realtime_verification(page, frame=None, timeout_s: int = VERIFY_WAIT_S) -> None:
+    """遇到「实名验证」弹窗时，把二维码截图留存并等待人工扫码。
+
+    之前它被直接算作失败（"实名" 在 FAIL_MARKERS 里），但这是**可以人工放行**
+    的环节：弹窗里是管理员微信二维码，扫一下就能继续，没必要整个任务报废。
+    """
+    dlg = None
+    for scope in ((page, frame) if frame is not None else (page,)):
+        try:
+            cand = scope.locator("div.weui-desktop-dialog__wrp:visible").filter(
+                has_text="实名验证").first
+            if cand.count() and cand.is_visible():
+                dlg = cand
+                break
+        except Exception:
+            continue
+    if dlg is None:
+        return
+
+    try:
+        p = os.path.join(_shot_dir(),
+                         f"{time.strftime('%Y%m%d-%H%M%S')}-verify-qr.png")
+        dlg.screenshot(path=p)
+        print(f"[WARN] 需要管理员微信扫码完成实名验证，二维码已保存：{p}")
+    except Exception as e:
+        print(f"[WARN] 实名验证二维码截图失败：{str(e)[:60]}")
+
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            if not dlg.count() or not dlg.is_visible():
+                print("[INFO] 实名验证已完成，继续发表")
+                return
+        except Exception:
+            return
+        _sleep(2)
+    raise PublishFlowError(
+        f"等待管理员实名验证超时（{timeout_s}s），请用微信扫描上面保存的二维码后重试"
+    )
+
+
 def _find_file_input(page, timeout_s: int = 60, accept_kinds: str = ""):
     """在**所有 frame** 里找文件上传控件。
 
@@ -77,10 +292,14 @@ def _find_file_input(page, timeout_s: int = 60, accept_kinds: str = ""):
 
     accept_kinds：形如 "video" 时只接受 accept 里含 video 的控件
     （页面同时存在视频/封面两个 file input，必须区分）。
+
+    参数既可以是 Page（遍历全部 frame）也可以是 Frame（只查它自己）——
+    封面设置时传进来的是 Frame，早期版本没做区分，导致自定义封面永远失败。
     """
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        for f in page.frames:
+        scopes = page.frames if hasattr(page, "frames") else [page]
+        for f in scopes:
             try:
                 n = f.locator('input[type="file"]').count()
             except Exception:
@@ -136,7 +355,7 @@ def _wait_upload_done(page, frame, timeout_s: int | None = None) -> bool:
     """
     timeout_s = timeout_s or int(getattr(config, "PUBLISH_UPLOAD_TIMEOUT_S", 3600))
     print(f"[INFO] 等待上传完成（上限 {timeout_s}s，大文件可能较久）…")
-    return _wait_form_ready(frame, timeout_s=timeout_s)
+    return _wait_form_ready(frame, timeout_s=timeout_s, page=page)
 
 
 def _get_post_frame(page, timeout_s: int = 60):
@@ -158,10 +377,19 @@ def _get_post_frame(page, timeout_s: int = 60):
     return page.main_frame
 
 
-def _wait_form_ready(frame, timeout_s: int = 240):
-    """等视频上传完成、表单出现（描述编辑器 + 关键字段文案）。"""
+def _wait_form_ready(frame, timeout_s: int = 240, page=None):
+    """等视频上传完成、表单出现（描述编辑器 + 关键字段文案）。
+
+    两个刻意的取舍：
+      - 日志每 30 秒一行且带「已等多久」。每 3 秒刷一行同样的「仍在上传中」
+        既把日志冲爆，也分不清是真的在传还是已经卡死——「还要多久」才是
+        这里唯一有用的信息。
+      - 主动识别「上传失败」并立刻报错，而不是干等到硬超时。页面上传出错时
+        会同屏出现错误提示和「删除」按钮，这是明确的失败信号。
+    """
     deadline = time.time() + timeout_s
-    warned = False
+    started = deadline - timeout_s
+    last_report = 0.0
     while time.time() < deadline:
         try:
             txt = frame.evaluate("document.body.innerText") or ""
@@ -175,13 +403,31 @@ def _wait_form_ready(frame, timeout_s: int = 240):
             ))
         except Exception:
             pass
-        if all(m in txt for m in ("视频描述", "短标题", "发表")) and has_editor:
+        if all(m in txt for m in FORM_READY_MARKERS) and has_editor:
             return True
-        # 弱网大文件时给点提示，避免用户以为卡死
-        if not warned and timeout_s > 300:
-            left = int((deadline - time.time()) // 60)
-            print(f"[INFO] 仍在上传中…（剩余约 {left} 分钟）")
-            warned = True
+        # 上传出错：错误提示 + 「删除」按钮同时出现 → 不要白等到超时
+        try:
+            err_n = (frame.locator("div.status-msg.error").count()
+                     + frame.locator("[class*=status-msg][class*=error]").count())
+            del_n = frame.locator(
+                'div.media-status-content div.tag-inner:has-text("删除")').count()
+            if err_n and del_n:
+                if page is not None:
+                    _shot(page, "upload-failed")
+                raise PublishFlowError(
+                    "视频上传失败（页面出现错误提示）。常见原因：文件损坏/过大、"
+                    "上行带宽太慢被平台侧判超时、或走了代理/VPN。请处理后重试"
+                )
+        except PublishFlowError:
+            raise
+        except Exception:
+            pass
+        now = time.time()
+        if now - last_report >= 30:
+            waited = int(now - started)
+            left = int((deadline - now) // 60)
+            print(f"[INFO] 仍在上传中…（已等 {waited}s，剩余约 {left} 分钟）")
+            last_report = now
         _sleep(3)
     return False
 
@@ -190,16 +436,24 @@ def _fill_contenteditable(frame, page, value: str) -> bool:
     """聚焦描述编辑器后键盘输入（Frame 没有 keyboard，必须用 page 级）。
 
     用键盘而不是 innerHTML：富文本编辑器直接赋 textContent 会丢内容/丢事件。
+
+    点不中时先怀疑被「切换视频号」弹窗挡住 —— 关掉再试，最多 4 轮。
+    早期版本只点一次，弹窗一出现就表现为「描述填不进去」但日志一片正常。
     """
-    focused = frame.evaluate(
-        "(()=>{const e=document.querySelector('.input-editor')||"
-        "Array.from(document.querySelectorAll('*')).find(x=>x.getAttribute('contenteditable')!==null);"
-        "if(!e) return false; e.focus&&e.focus(); e.click&&e.click(); return true;})()"
-    )
-    if not focused:
-        return False
-    page.keyboard.type(value, delay=15)
-    return True
+    js = ("(()=>{const e=document.querySelector('.input-editor')||"
+          "Array.from(document.querySelectorAll('*')).find(x=>x.getAttribute('contenteditable')!==null);"
+          "if(!e) return false; e.focus&&e.focus(); e.click&&e.click(); return true;})()")
+    for attempt in range(4):
+        try:
+            if frame.evaluate(js):
+                page.keyboard.type(value, delay=15)
+                return True
+        except Exception as e:
+            print(f"[WARN] 描述编辑器点击异常（{str(e)[:60]}）")
+        if attempt < 3:
+            _dismiss_switch_account_dialog(page, frame)
+            _sleep(0.5)
+    return False
 
 
 def _fill_form_item(frame, label: str, value: str) -> bool:
@@ -430,21 +684,22 @@ def _set_schedule(frame, page, when: str) -> bool:
 def _set_cover(frame, page, cover_path: str) -> bool:
     """上传自定义封面。
 
-    关键坑：封面弹窗打开后，页面上会同时存在「视频」和「封面」两个 file input，
-    必须按 accept 含 image 区分，否则会覆盖到视频控件上。
+    三个关键坑：
+    1. 封面弹窗打开后，页面上会同时存在「视频」和「封面」两个 file input，
+       必须按 accept 含 image 区分，否则会覆盖到视频控件上。
+    2. 关闭弹窗**只能点「确认/确定/完成/保存」，绝不能点「取消」**。
+       弹窗页脚按钮顺序是 [取消][确定]，早期版本按 DOM 顺序取第一个匹配，
+       点中的正是「取消」——刚传好的封面被整个作废，而且日志还显示设置成功。
+    3. 部分版本上传完会再弹「裁剪封面图」，需要额外确认一次。
     """
+    def _confirm(js: str) -> str:
+        try:
+            return frame.evaluate(js) or ""
+        except Exception:
+            return ""
+
     try:
-        opened = frame.evaluate(
-            """(() => {
-              const els = Array.from(document.querySelectorAll(
-                'button,div[class*=btn],span,div[class*=cover],div[class*=item]'));
-              for (const e of els) {
-                const t = (e.innerText || '').trim();
-                if (t && t.length <= 8 && /封面/.test(t)) { e.click && e.click(); return t; }
-              }
-              return '';
-            })()"""
-        )
+        opened = frame.evaluate(_COVER_OPEN_JS)
         if not opened:
             return False
         _sleep(2.5)
@@ -454,18 +709,13 @@ def _set_cover(frame, page, cover_path: str) -> bool:
             return False
         el.set_input_files(cover_path)
         _sleep(2)
-        # 关闭封面弹窗，避免遮挡「发表」按钮
-        frame.evaluate(
-            """(() => {
-              const els = Array.from(document.querySelectorAll('button,a,div[class*=close]'));
-              for (const e of els) {
-                const t = (e.innerText || '').trim();
-                if (/^(完成|确定|取消|保存)$/.test(t)) { e.click(); return t; }
-              }
-              return '';
-            })()"""
-        )
-        print("[INFO] 封面已设置")
+        _confirm(_COVER_CROP_JS)       # 裁剪确认（若出现）
+        _sleep(1)
+        acted = _confirm(_COVER_CONFIRM_JS)  # 关闭封面弹窗，避免遮挡「发表」按钮
+        if not acted:
+            print("[WARN] 封面弹窗未找到确认按钮，可能已遮挡「发表」")
+            return False
+        print(f"[INFO] 封面已设置（点击「{acted}」提交）")
         return True
     except Exception as e:
         print(f"[WARN] 设置封面异常：{str(e)[:80]}")
@@ -527,8 +777,9 @@ def publish_deterministic(acc: dict, mat: dict, overrides: dict | None = None) -
             return False, f"浏览器启动失败（档案可能被其它进程占用）：{e}"
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         try:
-            page.goto(config.PUBLISH_URL, wait_until="domcontentloaded", timeout=60000)
-            _sleep(6)
+            # 0) 打开发表页：必须先落首页再点「发表视频」，直接 goto 会拿到空壳 iframe
+            _open_post_page(page)
+            _sleep(3)
 
             # 1) 上传视频（遍历所有 frame + 注入重试）
             _upload_video(page, video_path)
@@ -541,6 +792,9 @@ def publish_deterministic(acc: dict, mat: dict, overrides: dict | None = None) -
                     f"视频上传未在 {config.PUBLISH_UPLOAD_TIMEOUT_S}s 内完成"
                     "（网络过慢或文件过大，请稍后重试或压缩视频）"
                 )
+
+            # 2.5) 管理员实名验证弹窗：截图留二维码并等人工扫码，而不是直接判失败
+            _wait_realtime_verification(page, frame)
 
             # 3) 填描述 / 短标题
             desc_ok = _fill_contenteditable(frame, page, full_desc[:900])

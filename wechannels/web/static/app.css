@@ -454,3 +454,23 @@ button.mini:hover,.mactions a.mini:hover{background:var(--elev);border-color:var
 .grabbox input[type=range]{flex:1;min-width:110px;accent-color:var(--acc)}
 .grabbox .btn{flex:0 0 auto}
 .grabbox .btn:disabled{opacity:.6;cursor:wait}
+
+/* ===========================================================================
+   编辑页视频区：竖版视频不该在两侧留大片空白
+   —— 用户截图标注的问题
+   原因：.vpreview .vp-main img 用了 max-height:250px + object-fit:contain，
+   竖版视频（1440×2574）在宽容器里会居中留黑边，看起来像"布局坏了"。
+   做法：竖版视频按高度撑开、宽度自适应，让画面尽量占满可视区；
+   容器保持居中，两侧留白收窄。
+   =========================================================================== */
+.vpreview .vp-main{display:flex;align-items:center;justify-content:center;
+  background:#000;min-height:120px}
+.vpreview .vp-main img,.vpreview .vp-main video{
+  width:auto;max-width:100%;max-height:300px;object-fit:contain;display:block;
+  margin:0 auto}
+/* 竖版（高>宽）视频：用高度反推宽度，避免整块区域只剩中间一条 */
+@media (max-width:900px){
+  .vpreview .vp-main img,.vpreview .vp-main video{max-height:260px}
+}
+/* 预览条：横版帧用 cover 裁切即可，但给个最小高度避免太扁 */
+.vpreview .vp-strip img{height:58px}

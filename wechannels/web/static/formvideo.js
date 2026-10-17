@@ -175,5 +175,18 @@
       // 已选了文件就不该再显示"抓帧"（此时服务端还没有这个文件）
       $('grabbox').style.display = 'none';
     });
+
+    // ---- 编辑页：进页面就自动显示已有视频的画面 ----
+    // 之前用户反馈"编辑页还是原来的样子"：只改内容不改路径就不会触发预览。
+    // 这里在页面加载时主动读 data-autoload 抽帧，省得用户再点一次。
+    var prevEl = $('vprev');
+    var auto = prevEl && prevEl.getAttribute('data-autoload');
+    if (auto && auto.trim() && ($('f_vpath') || {}).value === auto.trim()) {
+      // 用户没改过路径 → 直接抽帧显示
+      probeVideo(auto.trim());
+    } else if (prevEl && !auto) {
+      setPrev(prevEl, '<div class="vp-empty">这条素材还没有视频文件。' +
+        '填入路径或拖一个视频进来，这里会显示画面</div>');
+    }
   });
 })();

@@ -64,19 +64,48 @@
   <div class="card">
     <div class="g2">
       <div>
-        <label>视频文件（可上传/拖拽，或填本地路径）</label>
+        <label>视频文件 <span class="muted">（上传/拖拽，或填本地路径；官方限制 ≤4G · ≤2小时 · ≥720p）</span></label>
         <div class="drop" id="vdrop">点击选择 或 拖拽视频文件到这里</div>
-        <input type="file" name="video_file" id="vfile" accept="video/*,image/*" style="display:none">
-        <div class="thumbs" id="vprev">{% if m.video_path %}<video src="{{ media_url(m.video_path) }}" muted preload="metadata"></video>{% endif %}</div>
-        <input name="video_path" id="f_vpath" value="{{ m.video_path or "" }}" placeholder="或填本地路径 d:/videos/demo.mp4"
-               oninput="syncName(this.value)">
+        <input type="file" name="video_file" id="vfile" accept="video/*" style="display:none">
+        {# 视频画面预览：与新建页一致，进页面即自动显示已有视频的画面 #}
+        <div class="vpreview" id="vprev" data-autoload="{{ m.video_path or '' }}">
+          {% if m.video_path %}
+          <div class="vp-loading">正在读取视频画面…</div>
+          {% else %}
+          <div class="vp-empty">填入路径或选择文件后，这里会显示视频画面</div>
+          {% endif %}
+        </div>
+        <input name="video_path" id="f_vpath" value="{{ m.video_path or "" }}"
+               placeholder="或填本地路径 d:/videos/demo.mp4"
+               oninput="syncName(this.value)"
+               onchange="probeVideo(this.value)"
+               onblur="probeVideo(this.value)">
       </div>
       <div>
-        <label>封面图（可上传/拖拽，或填本地路径）</label>
+        <label>封面图 <span class="muted">（可上传/拖拽，或直接从左边视频抓帧）</span></label>
         <div class="drop" id="cdrop">点击选择 或 拖拽图片到这里</div>
         <input type="file" name="cover_file" id="cfile" accept="image/*" style="display:none">
-        <div class="thumbs" id="cprev">{% if m.cover_path %}<img src="{{ media_url(m.cover_path) }}" alt="">{% endif %}</div>
-        <input name="cover_path" id="f_cpath" value="{{ m.cover_path or "" }}" placeholder="或填本地路径 d:/videos/cover.jpg">
+        <div class="vpreview cprev" id="cprev">
+          {% if m.cover_path %}
+          <div class="vp-main"><img src="{{ media_url(m.cover_path) }}" alt=""></div>
+          {% else %}
+          <div class="vp-empty">还没有封面。可点下方按钮从视频抓一帧</div>
+          {% endif %}
+        </div>
+        {# ---- 从视频抓帧当封面（与新建页一致） ---- #}
+        <div class="grabbox" id="grabbox" style="display:none">
+          <div class="grabrow">
+            <button class="btn ghost" type="button" onclick="grabCover()">📸 抓这一帧当封面</button>
+            <input type="range" id="seekBar" min="0" max="100" value="30"
+                   style="flex:1" oninput="seekLabel()">
+            <span class="muted mono" id="seekVal" style="min-width:96px">第 0.0 秒</span>
+          </div>
+          <div class="muted" style="font-size:11px;margin-top:4px">
+            拖动滑块选画面，点上面的按钮把这一帧存为封面
+          </div>
+        </div>
+        <input name="cover_path" id="f_cpath" value="{{ m.cover_path or "" }}"
+               placeholder="或填本地路径 d:/videos/cover.jpg">
       </div>
     </div>
   </div>

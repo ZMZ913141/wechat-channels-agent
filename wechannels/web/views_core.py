@@ -8,7 +8,7 @@ import time
 import urllib.parse
 import uuid
 
-from flask import redirect, render_template, request, url_for
+from flask import jsonify, redirect, render_template, request, url_for
 
 from .. import (accounts, backup, config, ledger, login_state, materials,
                  media_probe, proclock)
@@ -219,6 +219,99 @@ def materials_batch_upload():
         # 只有一条时直接跳到编辑页，省得再手工填文案
         return redirect(url_for("edit_material", mid=added[0]["id"]))
     return redirect(url_for("index", msg=msg))
+
+
+@app.route("/media/thumbs")
+def media_thumbs():
+    """按路径抽帧返回预览图（供新建素材表单填路径时预览画面）。
+
+    ⚠️ 安全：path 是用户传来的本地路径，**只允许读视频文件**，
+    且限定扩展名，避免被当成任意文件读取接口。
+    """
+    from .. import thumbs as _th
+    path = (request.args.get("path", "") or "").strip()
+    if not path:
+        return jsonify(ok=False, reason="未提供路径")
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    if ext not in materials.VIDEO_EXTS:
+        return jsonify(ok=False, reason=f"不是视频文件（.{ext or '无扩展名'}）")
+    if not os.path.exists(path):
+        return jsonify(ok=False, reason="文件不存在，请检查路径")
+    try:
+        dur = _th.probe_duration(path)
+        main = _th.extract(path, at_second=(dur * 0.3 if dur > 0 else 0.5),
+                           width=480)
+        strip = _th.preview_strip(path, 4)      # 返回的就是已抽好的路径列表
+        if not main:
+            return jsonify(ok=False, reason="无法解码该视频（可能是不支持的编码）")
+        try:
+            st = os.stat(path)
+            size_mb = round(st.st_size / 1048576, 1)
+            w, h = _video_size(path)
+        except OSError:
+            size_mb, w, h = 0, 0, 0
+        return jsonify(
+            ok=True,
+            main=_media_url(main),
+            frames=[_media_url(f) for f in strip],
+            duration=round(dur, 2), width=w, height=h, size_mb=size_mb,
+        )
+    except Exception as e:
+        print(f"[WARN] 抽帧预览失败：{str(e)[:70]}")
+        return jsonify(ok=False, reason="读取失败")
+
+
+def _video_size(path: str):
+    """取视频宽高（读不出返回 0,0）。不额外依赖 ffprobe 的第二次调用。"""
+    from .. import thumbs as _th
+    exe = _th._ffprobe_exe()
+    if not exe:
+        return 0, 0
+    try:
+        import subprocess as _sp, json as _js
+        p = _sp.run([exe, "-v", "quiet", "-select_streams", "v:0",
+                     "-show_entries", "stream=width,height",
+                     "-print_format", "json", path],
+                    capture_output=True, timeout=30)
+        if p.returncode != 0:
+            return 0, 0
+        st = (_js.loads(p.stdout.decode("utf-8", "ignore") or "{}")
+              .get("streams") or [{}])[0]
+        return int(st.get("width") or 0), int(st.get("height") or 0)
+    except Exception:
+        return 0, 0
+
+
+def _media_url(path: str) -> str:
+    """本地绝对路径 → /media URL。复用 templating 里的实现（已处理 URL 编码与盘符）。"""
+    from .templating import media_url
+
+    return media_url(path)
+
+
+@app.route("/media/grab_cover", methods=["GET", "POST"])
+def media_grab_cover():
+    """从视频指定时间点抓一帧存为封面。"""
+    from .. import thumbs as _th
+    path = (request.args.get("path", "") or "").strip()
+    if not path:
+        return jsonify(ok=False, reason="未提供路径")
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    if ext not in materials.VIDEO_EXTS:
+        return jsonify(ok=False, reason=f"不是视频文件（.{ext or '无扩展名'}）")
+    if not os.path.exists(path):
+        return jsonify(ok=False, reason="文件不存在，请检查路径")
+    try:
+        t = float(request.args.get("t", 1) or 1)
+    except (TypeError, ValueError):
+        t = 1.0
+    dur = _th.probe_duration(path)
+    if dur > 0:
+        t = max(0.1, min(t, dur - 0.1))
+    out = _th.grab_cover(path, at_second=t, width=1080)
+    if not out:
+        return jsonify(ok=False, reason="抓帧失败（视频可能已损坏或编码不支持）")
+    return jsonify(ok=True, cover=out, url=_media_url(out), at=t)
 
 
 @app.route("/library/export/<fmt>")

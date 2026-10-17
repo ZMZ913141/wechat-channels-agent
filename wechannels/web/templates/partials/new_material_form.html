@@ -58,20 +58,43 @@
     <div><label>定时发表 <span class="muted">（留空=立即；助手端专属功能）</span></label>
       <input type="datetime-local" name="scheduled_at"></div>
   </div>
-  <div class="grid2">
+  <div class="grid2 vgrid">
     <div>
-      <label>视频文件（可上传或填本地路径；官方限制：≤4G / ≤2小时 / ≥720p）</label>
-      <div class="drop" id="vdrop">点击选择 或 拖拽视频文件到这里（可选）</div>
-      <input type="file" name="video_file" id="vfile" accept="video/*,image/*" style="display:none">
-      <div id="vprev" style="margin-top:6px"></div>
-      <input name="video_path" id="f_vpath" placeholder="或填本地路径 d:/videos/demo.mp4" oninput="syncName(this.value)">
+      <label>视频文件 <span class="muted">（上传 / 填路径均可；官方限制 ≤4G · ≤2小时 · ≥720p）</span></label>
+      <div class="drop" id="vdrop">点击选择 或 拖拽视频文件到这里</div>
+      <input type="file" name="video_file" id="vfile" accept="video/*" style="display:none">
+      {# 视频画面预览：填路径时由服务端抽帧显示，不只是路径文字 #}
+      <div class="vpreview" id="vprev">
+        <div class="vp-empty">填入路径或选择文件后，这里会显示视频画面</div>
+      </div>
+      <input name="video_path" id="f_vpath" placeholder="或填本地路径 d:/videos/demo.mp4"
+             oninput="syncName(this.value)"
+             onchange="probeVideo(this.value)"
+             onblur="probeVideo(this.value)">
+      <div class="muted" style="font-size:11px;margin-top:4px">
+        填完路径按回车或点别处，这里会自动显示视频画面
+      </div>
     </div>
     <div>
-      <label>封面图（可上传或填本地路径）</label>
-      <div class="drop" id="cdrop">点击选择 或 拖拽图片到这里（可选）</div>
+      <label>封面图 <span class="muted">（可上传 / 填路径，或直接从左边视频抓帧）</span></label>
+      <div class="drop" id="cdrop">点击选择 或 拖拽图片到这里</div>
       <input type="file" name="cover_file" id="cfile" accept="image/*" style="display:none">
-      <div id="cprev" style="margin-top:6px"></div>
-      <input name="cover_path" placeholder="或填本地路径 d:/videos/cover.jpg">
+      <div class="vpreview cprev" id="cprev">
+        <div class="vp-empty">还没有封面。可点下方按钮从视频抓一帧</div>
+      </div>
+      {# ---- 从视频抓帧当封面 ---- #}
+      <div class="grabbox" id="grabbox" style="display:none">
+        <div class="grabrow">
+          <button class="btn ghost" type="button" onclick="grabCover()">📸 抓这一帧当封面</button>
+          <input type="range" id="seekBar" min="0" max="100" value="30"
+                 style="flex:1" oninput="seekLabel()">
+          <span class="muted mono" id="seekVal" style="min-width:96px">第 0.0 秒</span>
+        </div>
+        <div class="muted" style="font-size:11px;margin-top:4px">
+          拖动滑块选画面，点上面的按钮把这一帧存为封面
+        </div>
+      </div>
+      <input name="cover_path" id="f_cpath" placeholder="或填本地路径 d:/videos/cover.jpg">
     </div>
   </div>
   <p><button class="btn" type="submit">保存素材</button> <span class="muted">也可以用顶部「目录导入」从本地文件夹批量导入（支持粘贴路径）。</span></p>

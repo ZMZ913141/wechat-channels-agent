@@ -416,3 +416,41 @@ button.mini:hover,.mactions a.mini:hover{background:var(--elev);border-color:var
   color:var(--mut);line-height:1.85}
 
 .tagline{font-size:12.5px;color:var(--mut);line-height:1.8;margin:0 0 10px}
+
+/* ===========================================================================
+   新建素材表单：视频画面预览 + 从视频抓帧当封面
+   —— 用户反馈原视频区只有一行路径文字、封面区无法从视频取帧
+   =========================================================================== */
+.vgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.vpreview{margin-top:7px;border-radius:9px;overflow:hidden;
+  background:var(--elev2);border:1px solid var(--line);min-height:118px}
+.vpreview .vp-empty,.vpreview .vp-loading,.vpreview .vp-err{
+  padding:26px 12px;text-align:center;font-size:12px;color:var(--mut);
+  line-height:1.7}
+.vpreview .vp-loading::after{content:"";display:block;width:15px;height:15px;
+  margin:9px auto 0;border:2px solid var(--line);border-top-color:var(--acc);
+  border-radius:50%;animation:vpspin .7s linear infinite}
+@keyframes vpspin{to{transform:rotate(360deg)}}
+.vpreview .vp-err{color:var(--bad)}
+.vpreview .vp-main{background:#000}
+.vpreview .vp-main img,.vpreview .vp-main video{
+  width:100%;max-height:250px;object-fit:contain;display:block}
+.vpreview .vp-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;
+  background:#000}
+.vpreview .vp-strip img{width:100%;height:52px;object-fit:cover;display:block;
+  cursor:pointer;opacity:.72;transition:opacity .15s}
+.vpreview .vp-strip img:hover{opacity:1}
+.vpreview .vp-meta{padding:6px 10px;font-size:11px;color:var(--mut);
+  background:var(--elev);border-top:1px solid var(--line);
+  font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.6}
+/* 封面预览：竖版封面按比例缩小，不裁切 */
+.cprev .vp-main img{max-height:210px;object-fit:contain}
+
+/* 抓帧工具条 */
+.grabbox{flex-direction:column;align-items:stretch;margin-top:8px;padding:10px 11px;
+  border:1px dashed var(--acc);border-radius:8px;
+  background:color-mix(in srgb, var(--acc) 6%, transparent);gap:6px}
+.grabrow{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.grabbox input[type=range]{flex:1;min-width:110px;accent-color:var(--acc)}
+.grabbox .btn{flex:0 0 auto}
+.grabbox .btn:disabled{opacity:.6;cursor:wait}

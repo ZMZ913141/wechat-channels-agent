@@ -304,13 +304,57 @@ def delete_many(mids: list) -> int:
 
 
 def set_status(mid: str, status: str):
-    return update_material(mid, {"status": status})
+    """改状态，并**记录变更历史**（供撤销用）。
+
+    为什么必须留痕：状态是单向操作，「标已发」点错了就只能去编辑页手改，
+    用户反馈里明确提到这个痛点。记一条 history 就能一键退回。
+    """
+    old = get_material(mid)
+    ok = update_material(mid, {"status": status})
+    if ok and old and old.get("status") != status:
+        it = get_material(mid)
+        if it is not None:
+            it.setdefault("status_history", []).append({
+                "from": old.get("status", ""),
+                "to": status,
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            # 只留最近 20 条，避免无上限增长
+            it["status_history"] = it["status_history"][-20:]
+            save_materials(_replace(load_materials(), it))
+    return ok
+
+
+def undo_status(mid: str) -> tuple[bool, str]:
+    """撤销最近一次状态变更。返回 (是否成功, 提示文本)。"""
+    it = get_material(mid)
+    if not it:
+        return False, "素材不存在"
+    hist = it.get("status_history") or []
+    if not hist:
+        return False, "这条素材没有可撤销的状态操作"
+    last = hist.pop()
+    it["status"] = last.get("from", "")
+    it["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    save_materials(_replace(load_materials(), it))
+    return True, f"已撤销：{last.get('from', '')} → <b>{it['status']}</b>"
+
+
+def _replace(items: list, target: dict) -> list:
+    """用 target 替换 items 里同 id 的那条（target 已是同一对象引用时也安全）。"""
+    for i, it in enumerate(items):
+        if it.get("id") == target.get("id"):
+            items[i] = target
+            return items
+    items.append(target)
+    return items
 
 
 def set_status_many(mids: list, status: str) -> int:
+    """批量改状态。逐条走 set_status 以保证历史留痕一致。"""
     n = 0
     for mid in mids:
-        if update_material(mid, {"status": status}):
+        if set_status(mid, status):
             n += 1
     return n
 

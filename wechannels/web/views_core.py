@@ -120,6 +120,7 @@ def index():
         items=[decorate(m) for m in page_items],
         sf=sf, label_filter=label_filter, q=q, sort=sort,
         # 分页上下文（切换筛选时靠它拼链接）
+        statuses=materials.STATUSES,
         page=page, pages=pages, per_page=per_page,
         total_shown=total, offset=start,
         # 导出链接要带上当前筛选条件，做到「所见即所得」
@@ -576,14 +577,55 @@ def materials_batch():
     return redirect(url_for("index"))
 
 
-@app.route("/materials/<mid>/status")
+@app.route("/materials/<mid>/label", methods=["POST"])
+def material_label_route(mid):
+    """卡片内就地增删分类标签（省得进编辑页）。
+
+    只影响 labels，不动标题/文案/发布历史。
+    """
+    op = (request.form.get("op") or "").strip()
+    label = (request.form.get("label") or "").strip()
+    if not materials.get_material(mid):
+        return redirect(url_for("index", msg=f"batch:0:素材 {mid[:8]} 不存在"))
+    if op == "add":
+        if not label:
+            return redirect(url_for("index", msg="batch:0:标签不能为空"))
+        cur = materials.get_labels(materials.get_material(mid))
+        if label.lower() in {x.lower() for x in cur}:
+            return redirect(url_for("index", msg=f'batch:0:标签「{html.escape(label)}」已经有了'))
+        materials.set_labels_many([mid], label, mode="add")
+        return redirect(url_for("index", msg=f"batch:1:已添加标签「{html.escape(label)}」"))
+    if op == "remove":
+        materials.set_labels_many([mid], label, mode="remove")
+        return redirect(url_for("index", msg=f"batch:1:已移除标签「{html.escape(label)}」"))
+    return redirect(url_for("index"))
+
+
+@app.route("/materials/<mid>/status", methods=["POST"])
 def status_route(mid):
-    st = request.args.get("status", "")
+    """改状态（POST：状态变更影响发布筛选，不该被预取误触发）。"""
+    st = (request.form.get("status") or request.args.get("status") or "").strip()
     if not materials.get_material(mid):
         return redirect(url_for("index", msg=f"batch:0:素材 {mid[:8]} 不存在，可能已被删除"))
     if st in materials.STATUSES:
+        m = materials.get_material(mid) or {}
+        old = m.get("status", "")
         materials.set_status(mid, st)
+        # 直接告诉用户"可以撤销"，并给出撤销入口 —— 误点后不用再找
+        tip = f'已改为「{html.escape(st)}」' if old != st else ""
+        if old != st:
+            tip += (f'&nbsp;<a href="/materials/{mid}/undo_status" '
+                    f'style="color:var(--acc);text-decoration:underline">撤销</a>')
+        if tip:
+            return redirect(url_for("index", msg=f"batch:1:{tip}"))
     return redirect(url_for("index"))
+
+
+@app.route("/materials/<mid>/undo_status")
+def undo_status_route(mid):
+    """撤销最近一次状态变更。"""
+    ok, text = materials.undo_status(mid)
+    return redirect(url_for("index", msg=f"batch:{1 if ok else 0}:{text}"))
 
 
 @app.route("/materials/<mid>/clone", methods=["GET", "POST"])

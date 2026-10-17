@@ -14,12 +14,18 @@
     <div class="mcoll"><a href="/?collection={{ m.collection|urlencode }}" title="按合集筛选">📚 {{ m.collection }}</a></div>
     {% endif %}
 
-    {# 分类标签：内部管理用，可点筛选 #}
+    {# 分类标签：内部管理用，可点筛选；点击「+」可就地增删 #}
     <div class="mlabels">
       {% for lb in m.labels_list %}
-      <a class="lchip{{ ' on' if label_filter and lb|lower == label_filter|lower else '' }}"
-         href="/?label={{ lb|urlencode }}" title="按「{{ lb }}」筛选">{{ lb }}</a>
+      <span class="lchip{{ ' on' if label_filter and lb|lower == label_filter|lower else '' }}"
+            title="点标签筛选素材">
+        <a href="/?label={{ lb|urlencode }}" style="color:inherit;text-decoration:none">{{ lb }}</a>
+        <button class="lchip-x" title="移除标签「{{ lb }}」"
+                onclick="rmLabel('{{ m.id }}','{{ lb }}')">×</button>
+      </span>
       {% endfor %}
+      <button class="lchip-add" title="给这条素材加标签"
+              onclick="addLabel('{{ m.id }}', this)">＋</button>
     </div>
 
     {# 话题标签：发布时进视频描述，观众可见 #}
@@ -43,7 +49,22 @@
       <a class="mini" href="/materials/{{ m.id }}/edit">编辑</a>
       <a class="mini" href="/publish?material={{ m.id }}">发布</a>
       <a class="mini" href="/materials/{{ m.id }}/clone">复用</a>
-      <a class="mini" href="/materials/{{ m.id }}/status?status=已发布">标已发</a>
+
+      {# ---- 状态：下拉可选任意状态；有历史时提供一键撤销 ---- #}
+      <form method="post" action="/materials/{{ m.id }}/status" class="stform">
+        <select name="status" class="stsel" onchange="this.form.submit()"
+                title="点击切换状态（改完可撤销）">
+          {% for s in statuses %}
+          <option value="{{ s }}"{{ ' selected' if m.status == s else '' }}>{{ s }}</option>
+          {% endfor %}
+        </select>
+        {% if m.can_undo_status %}
+        <a class="mini" href="/materials/{{ m.id }}/undo_status"
+           title="撤销上一次状态变更：回到「{{ m.prev_status }}」"
+           onclick="return confirm('撤销上一次状态变更？\n\n当前「{{ m.status }}」→ 恢复为「{{ m.prev_status }}」')">↩ 撤销</a>
+        {% endif %}
+      </form>
+
       {# 删除是破坏性操作 → 用 POST 提交，不用 GET 链接：
          避免浏览器预取 / 爬虫 / 链接预览误触发删除 #}
       <form method="post" action="/materials/{{ m.id }}/delete" style="display:inline"

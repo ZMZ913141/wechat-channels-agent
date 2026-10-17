@@ -90,6 +90,14 @@ def decorate(m: dict) -> dict:
     d = dict(m)
     d["labels_list"] = materials.get_labels(m)
     d["topic_list"] = topic_list(m)
+    # 状态撤销：最近一次变更是从哪个状态改过来的（供卡片显示"↩ 撤销"）
+    hist = m.get("status_history") or []
+    if hist and hist[-1].get("to") == m.get("status"):
+        d["can_undo_status"] = True
+        d["prev_status"] = hist[-1].get("from", "")
+    else:
+        d["can_undo_status"] = False
+        d["prev_status"] = ""
     return d
 
 
@@ -217,6 +225,7 @@ def dt_local(value) -> str:
 # ---------------------------------------------------------------------------
 app.jinja_env.globals.update(
     status_class=status_class,
+    statuses=lambda: materials.STATUSES,
     topic_list=topic_list,
     copy_text=copy_text,
     thumb=thumb,

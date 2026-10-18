@@ -6,8 +6,9 @@
 """
 import html
 import os
+import urllib.parse
 
-from flask import render_template
+from flask import render_template, request
 
 from .. import materials
 from .base import app
@@ -114,11 +115,11 @@ def label_cloud(account_id: str, current: str = "") -> str:
         return ""
     out = ['<div class="labelbar"><span class="muted" style="font-size:12px">分类标签</span>']
     if current:
-        out.append('<a class="lchip on" href="/">✕ 清除筛选</a>')
+        out.append(f'<a class="lchip on" href="/{filter_qs(label="")}">✕ 清除筛选</a>')
     for name, cnt in pairs[:24]:
         on = " on" if (current and name.lower() == current.lower()) else ""
         out.append(
-            f'<a class="lchip{on}" href="/?label={_urlq(name)}">{html.escape(name)}'
+            f'<a class="lchip{on}" href="/{filter_qs(label=name)}">{html.escape(name)}'
             f'<span class="cn">{cnt}</span></a>'
         )
     out.append("</div>")
@@ -129,6 +130,33 @@ def _urlq(s: str) -> str:
     from urllib.parse import quote
 
     return quote(s)
+
+
+def _build_filter_qs(**over) -> str:
+    """拼筛选链接的 query string，并**保留当前其它筛选条件**。
+
+    之前状态/合集/标签芯片各自写死 `href=\"/?status=xxx\"`，
+    一点就把搜索词、合集、标签全清掉 —— 素材一多根本没法组合筛选。
+    这里以 request.args 为基准，再用 over 覆盖/清除某个维度。
+    """
+    cur = {}
+    for k in ("q", "status", "label", "collection"):
+        v = (request.args.get(k, "") or "").strip()
+        if v:
+            cur[k] = v
+    for k, v in over.items():
+        v = (v or "").strip()
+        if v:
+            cur[k] = v
+        else:
+            cur.pop(k, None)
+    return urllib.parse.urlencode(cur)
+
+
+def filter_qs(**over) -> str:
+    """模板里用的全局：返回形如 `?q=xxx&status=已发布` 的字符串（可能为空串）。"""
+    qs = _build_filter_qs(**over)
+    return ("?" + qs) if qs else ""
 
 
 def library_summary(account_id: str) -> str:
@@ -234,6 +262,7 @@ app.jinja_env.globals.update(
     label_options=label_options,
     label_cloud=label_cloud,
     library_summary=library_summary,
+    filter_qs=filter_qs,
     accounts_channel=accounts_channel,
     login_badge=login_badge,
     media_url=media_url,

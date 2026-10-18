@@ -522,6 +522,56 @@ def test_hardening():
 
 
 # ===========================================================================
+# 15) 筛选链接组合保留（filter_qs）
+# ===========================================================================
+def test_filter_qs():
+    print("[筛选链接组合保留]")
+    from app import app as _app
+    from wechannels.web.templating import filter_qs
+    with _app.test_request_context("/?q=篮球&collection=我的合集"):
+        qs = filter_qs(status="待发布")
+        ck("状态芯片保留 q 与 collection",
+           "q=" in qs and "collection=" in qs and "status=" in qs, qs)
+        qs2 = filter_qs(collection="")
+        ck("清空合集仍保留 q",
+           "q=" in qs2 and "collection=" not in qs2, qs2)
+    with _app.test_request_context("/"):
+        qs3 = filter_qs(status="已发布")
+        ck("无筛选时只带 status", "status=" in qs3 and "q=" not in qs3, qs3)
+
+
+# ===========================================================================
+# 16) 发布页复选框尊重素材设置（修复 not m → not mat）
+# ===========================================================================
+def test_publish_checkboxes():
+    print("[发布页复选框尊重素材设置]")
+    if not accounts.current_account_id():
+        accounts.add_account({"id": "chk_acc", "name": "chk"})
+        accounts.set_current_account("chk_acc")
+    aid = accounts.current_account_id()
+    import re
+    def _mk(**kw):
+        vid = os.path.join(tempfile.mkdtemp(), "v.mp4")
+        open(vid, "wb").write(b"x")
+        kw.setdefault("video_path", vid)
+        kw.setdefault("ai_declare", "非AI内容")
+        kw.setdefault("visibility", "公开")
+        return materials.add_material(kw, account_id=aid)
+    m_f = _mk(title="t_false", original=False, allow_comment=False, allow_download=False)
+    m_t = _mk(title="t_true", original=True, allow_comment=True, allow_download=True)
+    from app import app as _app
+    c = _app.test_client()
+    def _chk(mid, expect):
+        h = c.get(f"/publish?material={mid}").get_data(as_text=True)
+        for n in ("original", "allow_comment", "allow_download"):
+            mm = re.search(r'name="' + n + r'" value="true"([^>]*)>', h)
+            got = bool(mm and "checked" in mm.group(1))
+            ck(f"复选框 {n} = {expect}（素材 {mid[:4]}）", got == expect)
+    _chk(m_f["id"], False)
+    _chk(m_t["id"], True)
+
+
+# ===========================================================================
 # 14) media 服务：Range 解析（含开放区间 bytes=0-）
 # ===========================================================================
 def test_media_service():
@@ -560,6 +610,8 @@ if __name__ == "__main__":
     test_migrate()
     test_proclock()
     test_hardening()
+    test_filter_qs()
+    test_publish_checkboxes()
     test_views_smoke()
     test_media_service()
 

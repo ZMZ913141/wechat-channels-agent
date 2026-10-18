@@ -24,11 +24,11 @@
     <div class="card">
       <h2>素材库 <span class="sub">{{ count }} 条 · 当前账号</span>
         <span class="chips" style="margin-left:auto">
-          <a class="{{ 'on' if not sf and not label_filter else '' }}" href="/">全部</a>
-          <a class="{{ 'on' if sf == '待发布' else '' }}" href="/?status=待发布">待发布</a>
-          <a class="{{ 'on' if sf == '草稿' else '' }}" href="/?status=草稿">草稿</a>
-          <a class="{{ 'on' if sf == '已发布' else '' }}" href="/?status=已发布">已发布</a>
-          <a class="{{ 'on' if sf == '已归档' else '' }}" href="/?status=已归档">已归档</a>
+          <a class="{{ 'on' if not sf else '' }}" href="/{{ filter_qs(status='') }}">全部</a>
+          <a class="{{ 'on' if sf == '待发布' else '' }}" href="/{{ filter_qs(status='待发布') }}">待发布</a>
+          <a class="{{ 'on' if sf == '草稿' else '' }}" href="/{{ filter_qs(status='草稿') }}">草稿</a>
+          <a class="{{ 'on' if sf == '已发布' else '' }}" href="/{{ filter_qs(status='已发布') }}">已发布</a>
+          <a class="{{ 'on' if sf == '已归档' else '' }}" href="/{{ filter_qs(status='已归档') }}">已归档</a>
         </span>
       </h2>
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:-2px 0 10px">
@@ -89,10 +89,10 @@
       {% if collections %}
       <div class="labelbar">
         <span class="muted" style="font-size:12px">合集</span>
-        <a class="lchip{{ ' on' if not collection_filter else '' }}" href="/?collection={{ '' }}">全部</a>
+        <a class="lchip{{ ' on' if not collection_filter else '' }}" href="/{{ filter_qs(collection='') }}">全部</a>
         {% for c in collections %}
         <a class="lchip{{ ' on' if collection_filter == c.name else '' }}"
-           href="/?collection={{ c.name|urlencode }}">
+           href="/{{ filter_qs(collection=c.name) }}">
           📚 {{ c.name }}<span class="cn">{{ coll_counts.get(c.name, 0) }}</span></a>
         {% endfor %}
         <a class="lchip" href="/collections" target="_blank" style="margin-left:auto">管理合集 →</a>

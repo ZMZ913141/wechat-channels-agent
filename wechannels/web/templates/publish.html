@@ -77,9 +77,9 @@
           {% for v in ai_opts %}<option value="{{ v }}"{{ ' selected' if (mat and mat.ai_declare == v) else '' }}>{{ v }}</option>{% endfor %}
         </select>
         <div class="checks">
-          <label><input type="checkbox" name="original" value="true" {{ "checked" if (not m or mat.original) }}> 声明原创（展示原创标记，有机会获得广告收入）</label>
+          <label><input type="checkbox" name="original" value="true" {{ "checked" if (not mat or mat.original) }}> 声明原创（展示原创标记，有机会获得广告收入）</label>
           <label><input type="checkbox" name="allow_download" value="true" {{ "checked" if mat and mat.allow_download }}> 允许他人下载视频</label>
-          <label><input type="checkbox" name="allow_comment" value="true" {{ "checked" if (not m or mat.allow_comment is not defined or mat.allow_comment) }}> 允许评论</label>
+          <label><input type="checkbox" name="allow_comment" value="true" {{ "checked" if (not mat or mat.allow_comment is not defined or mat.allow_comment) }}> 允许评论</label>
         </div>
         <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div><label>可见范围</label>

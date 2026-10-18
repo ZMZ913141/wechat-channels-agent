@@ -141,7 +141,9 @@ def publish_start():
             start_publish_job(mid, acc_ids, overrides)
     except ValueError as e:
         return redirect(url_for("publish_page", err=str(e)))
-    return redirect(url_for("publish_page", started="1"))
+    # 带上 material 参数：发布后回到页面时仍停在同一条素材，不用重新找
+    return redirect(url_for("publish_page", started="1",
+                            material=mids[0] if mids else ""))
 
 
 @app.route("/publish/retry/<mid>/<aid>")
@@ -154,4 +156,4 @@ def publish_retry(mid, aid):
         start_publish_job(mid, [aid], {})
     except ValueError as e:
         return redirect(url_for("publish_page", err=str(e)))
-    return redirect(url_for("publish_page", started="1"))
+    return redirect(url_for("publish_page", started="1", material=mid))

@@ -1,6 +1,7 @@
 """配置加载：从 .env 读取，全部带默认值，方便直接跑。"""
 import os
 import json
+import time
 
 from dotenv import load_dotenv
 
@@ -56,6 +57,9 @@ STATE_DIR = os.path.abspath(_get("STATE_DIR", os.path.join(_BASE, "state")))
 # ⚠️ 首次扫码登录 / 需要肉眼确认上传过程时才设 false —— 那时用面板的
 # 「扫码登录 / 打开发表页」按钮（有头），与此开关无关。
 PUBLISH_HEADLESS = _get("PUBLISH_HEADLESS", "true").lower() == "true"
+# 监控/后台 Agent 发布是否无头运行（有头只在用户主动「打开发表页」时出现）。
+# 默认 true：后台任务不该打断你。
+MONITOR_HEADLESS = _get("MONITOR_HEADLESS", "true").lower() == "true"
 # 发布方式：
 #   deterministic = 确定性填写（Playwright 直填表单，无需 LLM，快且稳；推荐）
 #   agent         = browser-use Agent「看懂页面」操作（抗大幅改版，但依赖 LLM）
@@ -102,6 +106,13 @@ def save_json_atomic(path: str, data, *, ensure_ascii: bool = False,
     """
     import threading
     import uuid as _uuid
+
+    # ⚠️ 必须确保目标目录存在：部分调用方（如首次落盘、或没显式建目录的入口）
+    # 未必先建好 STATE_DIR，否则 os.replace 前的临时文件 open 会直接抛
+    # FileNotFoundError。这里兜底建一次，彻底消除这个脆弱点。
+    _dir = os.path.dirname(path)
+    if _dir:
+        os.makedirs(_dir, exist_ok=True)
 
     tmp = f"{path}.tmp{os.getpid()}.{threading.get_ident():x}.{_uuid.uuid4().hex[:6]}"
     try:

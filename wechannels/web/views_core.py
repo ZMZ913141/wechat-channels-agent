@@ -529,9 +529,11 @@ def materials_autofill():
     except Exception as e:
         print(f"[WARN] AI 填写异常（{field or 'all'}）：{str(e)[:80]}")
         data = {}
+    # ⚠️ 必须用 jsonify：直接 json.dumps 字符串会让响应 Content-Type 变成
+    # text/html，前端 fetch().json() 无法解析（这正是一个导致"一键生成无反应"的 bug）。
     if field:
-        return json.dumps({"value": data.get(field, "")}, ensure_ascii=False)
-    return json.dumps(data, ensure_ascii=False)
+        return jsonify(value=data.get(field, ""))
+    return jsonify(data)
 
 
 @app.route("/materials/<mid>/edit", methods=["GET", "POST"])
@@ -736,7 +738,13 @@ def _send_video(ap: str):
     from flask import Response
 
     size = os.path.getsize(ap)
-    mime = "video/mp4" if ap.lower().endswith((".mp4", ".m4v")) else "video/mp4"
+    ext = ap.lower().rsplit(".", 1)[-1]
+    mime = {
+        "mp4": "video/mp4",
+        "m4v": "video/mp4",
+        "mov": "video/quicktime",
+        "webm": "video/webm",
+    }.get(ext, "video/mp4")
     rng = request.headers.get("Range", "")
     if not rng:
         def gen():
@@ -749,10 +757,15 @@ def _send_video(ap: str):
 
         return Response(gen(), mimetype=mime, headers={"Accept-Ranges": "bytes"})
     try:
-        s, e = rng.replace("bytes=", "").split("-")
+        unit, _, spec = rng.partition("=")
+        if unit.strip().lower() != "bytes":
+            return Response(b"", status=416, mimetype=mime)
+        s, _sep, e = spec.strip().partition("-")
         start = int(s) if s else 0
-        end = int(e) if e else size - 1
+        end = int(e) if e else size - 1   # 开放区间（bytes=0-）也要支持
         end = min(end, size - 1)
+        if start > end:
+            return Response(b"", status=416, mimetype=mime)
         length = end - start + 1
     except Exception:
         return Response(b"", status=416, mimetype=mime)

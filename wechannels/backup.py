@@ -167,11 +167,14 @@ def restore(name: str, auto_backup_first: bool = True) -> dict:
                 # ---- 写入后回读校验（防止假成功）----
                 try:
                     got = os.path.getsize(target)
-                    if got <= 2:          # "[]" / "{}" 之类，几乎等于空数据
+                    if got == 0:          # 0 字节才是真·空文件，绝不能当有效数据还原
                         empty.append(fn)
                         continue
                     with open(target, "rb") as f:
                         json.loads(f.read().decode("utf-8"))   # 必须是合法 JSON
+                    # 注意：合法的空列表/空对象（[] / {}）也视为还原成功，
+                    # 不当成"数据丢失"——否则一个空的 collections.json 会让整个
+                    # 还原被判失败（这正是修掉的假失败 bug）。
                     restored.append(fn)
                 except Exception as e:
                     failed.append(f"{fn}(校验失败:{str(e)[:30]})")

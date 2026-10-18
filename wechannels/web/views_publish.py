@@ -38,7 +38,7 @@ def publish_page():
                 dur = f'{int(dur_s // 60)}分{int(dur_s % 60)}秒' if dur_s else "—"
                 warns = media_probe.check_compliance(info)
                 cls = "bad" if warns else "ok"
-                size_mb = round((info.get("size") or 0) / 1048576, 1)
+                size_mb = info.get("size_mb") or 0
                 extra = f'<div class="bad">⚠️ {"；".join(warns)}</div>' if warns else ""
                 probe_html = (f'<div class="probe {cls}">视频规格：{res} · {dur} · {size_mb} MB'
                               f' · {info.get("fps", "?")}fps{extra}</div>')

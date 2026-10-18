@@ -133,7 +133,7 @@ def save_accounts(accounts: list) -> None:
     """
     os.makedirs(config.STATE_DIR, exist_ok=True)
     data = [_normalize_account(dict(a)) if isinstance(a, dict) else a for a in accounts]
-    config.save_json_atomic(_path(), data, ensure_ascii=False)
+    config.save_json_atomic(ACCOUNTS_FILE, data, ensure_ascii=False)
 
 def get_account(aid: str) -> dict | None:
     for a in load_accounts():

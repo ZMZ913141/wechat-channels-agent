@@ -11,6 +11,7 @@ from flask import Response, render_template, request
 
 from .. import accounts, loginprobe, stats
 from .base import app
+from .exporters import _content_disposition
 
 
 @app.route("/dashboard")
@@ -75,7 +76,7 @@ def dashboard_export():
         "﻿" + out,
         mimetype="text/csv",
         headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{fn}",
+            "Content-Disposition": _content_disposition(fn),
             #手工指定 charset：Flask 会给 text/csv 自动补 charset，导致重复
             "Content-Type": "text/csv; charset=utf-8",
         },

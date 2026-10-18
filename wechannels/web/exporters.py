@@ -17,10 +17,25 @@ import io
 import json
 import os
 import time
+from urllib.parse import quote
 
 from flask import Response
 
 from .. import materials
+
+
+def _content_disposition(fn: str) -> str:
+    """构造下载响应头。
+
+    ⚠️ RFC 5987：带中文的下载文件名必须 percent-encoding，
+    否则 werkzeug 在发送 HTTP 头时用 latin-1 编码会抛
+    UnicodeEncodeError（实测导出接口真实崩过）。
+
+    同时给一个 ASCII 回退名（filename=），兼容不识别 filename* 的老浏览器。
+    """
+    enc = quote(fn)                       # UTF-8 → percent-encoded，纯 ASCII
+    ascii_fallback = "".join(c if ord(c) < 128 else "_" for c in fn)
+    return f"attachment; filename={ascii_fallback}; filename*=UTF-8''{enc}"
 
 
 # CSV 列顺序（按「发布时最常看的」排）
@@ -118,7 +133,7 @@ def export_csv(account_id: str | None = None, keyword: str = "", label: str = ""
         mimetype="text/csv",
         headers={
             "Content-Type": "text/csv; charset=utf-8",
-            "Content-Disposition": f"attachment; filename*=UTF-8''{fn}",
+            "Content-Disposition": _content_disposition(fn),
         },
     )
 
@@ -138,7 +153,7 @@ def export_json(account_id: str | None = None, keyword: str = "", label: str = "
         mimetype="application/json",
         headers={
             "Content-Type": "application/json; charset=utf-8",
-            "Content-Disposition": f"attachment; filename*=UTF-8''{fn}",
+            "Content-Disposition": _content_disposition(fn),
         },
     )
 
@@ -159,8 +174,9 @@ def export_text(account_id: str | None = None, keyword: str = "",
     fn = f"文案_{time.strftime('%Y%m%d_%H%M')}.txt"
     return Response(
         "\n".join(parts),
-        mimetype="text/plain; charset=utf-8",
+        mimetype="text/plain",
         headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{fn}",
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Disposition": _content_disposition(fn),
         },
     )

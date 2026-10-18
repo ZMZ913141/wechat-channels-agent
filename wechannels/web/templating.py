@@ -6,6 +6,7 @@
 """
 import html
 import os
+import time
 import urllib.parse
 
 from flask import render_template, request
@@ -248,6 +249,28 @@ def dt_local(value) -> str:
     return s[:16]
 
 
+def pause_badge(aid: str) -> str:
+    """「手动操作中」徽标；只在该账号处于暂停窗口时返回内容。
+
+    为什么要显示：点过「扫码登录 / 打开发表页」后账号会被暂停，
+    期间发布会直接被拒。之前面板上看不出这个状态，用户只会觉得
+    「发布按钮坏了」。这里把状态和剩余时间摆出来。
+    """
+    from .. import proclock as _pc
+
+    try:
+        p = _pc.paused(aid)
+    except Exception:
+        return ""
+    if not p:
+        return ""
+    left = max(0, int(float(p.get("until") or 0) - time.time()))
+    mins = left // 60
+    why = html.escape(str(p.get("reason") or "手动操作"))
+    return (f'<div class="lrow warn"><span class="lname">{why}中</span>'
+            f'<span class="ltag warn">剩 {mins} 分钟</span></div>')
+
+
 # ---------------------------------------------------------------------------
 # 注册为 Jinja2 全局
 # ---------------------------------------------------------------------------
@@ -265,6 +288,7 @@ app.jinja_env.globals.update(
     filter_qs=filter_qs,
     accounts_channel=accounts_channel,
     login_badge=login_badge,
+    pause_badge=pause_badge,
     media_url=media_url,
     acc_display=acc_display,
     acc_chip=acc_chip,

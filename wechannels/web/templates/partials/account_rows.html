@@ -1,5 +1,6 @@
 {# 账号列表中的一行 #}
 {% for a in rows %}
+{% set paused_badge = pause_badge(a.id) %}
 <tr>
   <td><code>{{ a.id }}</code></td>
   <td>{{ a.name }}</td>
@@ -15,7 +16,7 @@
   </td>
   <td>{{ '✔ 启用' if a.enabled else '— 停用' }}</td>
   <td>{{ '● 当前' if a.id == cur else '' }}</td>
-  <td>{{ login_badge(a.id)|safe }}</td>
+  <td>{{ login_badge(a.id)|safe }}{{ paused_badge|safe }}</td>
   <td>
     <a class="btn" href="/accounts/{{ a.id }}/login">扫码登录</a>
     <a class="ghost btn" href="/accounts/{{ a.id }}/probe">检测登录</a>
@@ -25,7 +26,10 @@
     {% if a.id != cur %}
     <a class="ghost btn" href="/accounts/{{ a.id }}/set_current">设为当前</a>
     {% endif %}
-    <a class="ghost btn" href="/accounts/{{ a.id }}/resume">解除暂停</a>
+    {% if paused_badge %}
+    <a class="ghost btn" href="/accounts/{{ a.id }}/resume"
+       title="该账号正被「手动操作」暂停，发布会被拒绝；点这里提前解除">解除暂停</a>
+    {% endif %}
     {# 删除账号代价最高（登录态一起没了，要重新扫码），故用 POST + 二次确认 #}
     <form method="post" action="/accounts/{{ a.id }}/delete" style="display:inline"
           onsubmit="return confirm('确认删除账号「{{ a.name }}」？\n\n· 只删配置，浏览器档案目录会保留\n· 但下次要用它发布时，可能需要重新扫码登录')">

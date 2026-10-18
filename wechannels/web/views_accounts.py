@@ -64,9 +64,17 @@ def accounts_page():
         msg = ('<div class="msg ok">账号已添加（浏览器档案目录已创建）。'
                '点「扫码登录」用对应微信号登录后即可使用。</div>')
     elif m == "login":
-        msg = ('<div class="msg ok">已打开扫码窗口（新弹出的控制台窗口有操作提示）。'
-               '用微信扫描页面二维码并确认，控制台出现「登录成功」即可。'
+        msg = ('<div class="msg ok">已打开扫码窗口。'
+               '如果<b>没有看到浏览器窗口</b>，请到任务栏找一下 Edge / Chrome 图标'
+               '（它可能被这个控制台窗口挡住了）。'
+               '用微信扫描页面二维码并确认，控制台出现「登录成功」即可；'
                '完成后<b>关闭浏览器窗口</b>，登录态就保存好了。</div>')
+    elif m == "busy":
+        msg = ('<div class="msg warn">这个账号的浏览器档案正被占用，'
+               '所以没有重复打开窗口——<b>一个账号同时只能开一个浏览器窗口</b>。<br>'
+               '· 如果上次打开的窗口还在（可能被挡在后面）：直接切到那个窗口扫码即可；<br>'
+               '· 如果那个窗口已经关了：等几秒再点一次「扫码登录」；<br>'
+               '· 如果该账号正在发布：等发布结束后再登录。</div>')
     elif m == "lastacct":
         msg = ('<div class="msg bad">不能删除最后一个账号——'
                '删掉后面板就没有可用的视频号了。'
@@ -124,8 +132,18 @@ def accounts_new():
 
 @app.route("/accounts/<aid>/login")
 def accounts_login(aid):
-    if not accounts.get_account(aid):
+    acc = accounts.get_account(aid)
+    if not acc:
         return redirect(url_for("accounts_page"))
+    # 一个浏览器档案同时只能被一个进程打开。若已有窗口占着，再点「扫码登录」
+    # 只会让新进程静默等锁（最多 45 秒）然后报错——用户看到的就是「卡住了」。
+    # 所以这里先看一眼占用者，有就直说，不白开一个控制台窗口。
+    try:
+        holder = proclock.read_holder(accounts.profile_path(acc))
+    except Exception:
+        holder = None
+    if holder:
+        return redirect(url_for("accounts_page", msg="busy"))
     # 扫码登录需要独占浏览器档案：打暂停标记，正在进行的发布会主动避开
     proclock.pause(aid, reason="扫码登录", owner="manual")
     # open_publish.py 通过环境变量 ACCOUNT_ID 接收账号

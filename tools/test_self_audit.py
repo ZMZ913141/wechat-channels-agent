@@ -572,7 +572,60 @@ def test_publish_checkboxes():
 
 
 # ===========================================================================
-# 14) media 服务：Range 解析（含开放区间 bytes=0-）
+# 14) 扫码登录：档案被占用时要「立刻说清楚」，不能静默等待
+# ===========================================================================
+def test_login_busy():
+    print("[扫码登录 · 档案占用]")
+    import contextlib
+    import io
+
+    from wechannels import launcher
+
+    acc = accounts.add_account({"id": "loginbusy", "name": "占用测试"})
+    prof = accounts.profile_path(acc)
+
+    # 造一把「活占用」锁（占用者标签不是登录窗口 → 应进入等待并持续提示）
+    lp = proclock._lock_path(prof)
+    os.makedirs(os.path.dirname(lp), exist_ok=True)
+    with open(lp, "w", encoding="utf-8") as f:
+        json.dump({"pid": os.getpid(), "tag": "发布任务",
+                   "since": "2026-01-01 00:00:00"}, f)
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ok, holder = launcher._acquire_profile(prof, "打开发表页（loginbusy）", wait_s=3)
+    out = buf.getvalue()
+    ck("锁被占用 → 抢锁失败", ok is False and bool(holder), f"ok={ok}")
+    ck("等待期间有进度提示（不再静默）", "[WAIT]" in out)
+    ck("提示里写明占用者", "发布任务" in out)
+
+    # 面板路由：已有占用 → 直接提示 busy，不再拉起一个白等 45 秒的控制台
+    from app import app as _app
+    c = _app.test_client()
+    rv = c.get("/accounts/loginbusy/login")
+    ck("面板点扫码登录 → 重定向", rv.status_code in (302, 303), f"status={rv.status_code}")
+    loc = rv.headers.get("Location", "")
+    ck("重定向带 msg=busy（明确告知，不白开窗口）", "msg=busy" in loc, loc)
+    ck("被占用时不打暂停标记", not proclock.paused("loginbusy"))
+
+    # 抢锁失败提前退出 → 必须解除暂停标记，否则该账号最长 30 分钟内发布全被拒
+    proclock.pause("loginbusy", reason="扫码登录", owner="manual")
+    ck("暂停标记已打上", proclock.paused("loginbusy"))
+    from wechannels.web.templating import pause_badge
+    ck("面板显示「手动操作中」徽标", "剩" in pause_badge("loginbusy"))
+    launcher._resume_unless_window_open("loginbusy", prof)
+    ck("未开窗口时自动解除暂停（发布不被阻塞）", not proclock.paused("loginbusy"))
+    ck("解除后徽标消失", pause_badge("loginbusy") == "")
+
+    # 残留锁（持有进程已死）不应被当成占用：read_holder 会顺手清掉
+    with open(lp, "w", encoding="utf-8") as f:
+        json.dump({"pid": 999999, "tag": "打开发表页（loginbusy）"}, f)
+    ck("残留锁（进程已死）自动清理", proclock.read_holder(prof) is None)
+    ck("清理后锁文件已删除", not os.path.exists(lp))
+
+
+# ===========================================================================
+# 15) media 服务：Range 解析（含开放区间 bytes=0-）
 # ===========================================================================
 def test_media_service():
     print("[media /_send_video Range]")
@@ -610,6 +663,7 @@ if __name__ == "__main__":
     test_migrate()
     test_proclock()
     test_hardening()
+    test_login_busy()
     test_filter_qs()
     test_publish_checkboxes()
     test_views_smoke()

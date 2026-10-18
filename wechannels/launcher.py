@@ -18,8 +18,10 @@ from . import accounts, config, loginprobe, proclock
 # 视频号助手平台首页（未登录时会自动展示登录二维码）
 PLATFORM_URL = "https://channels.weixin.qq.com/platform"
 
-# 扫码最长等待时间（秒），超时只提示，不强制关闭窗口
-LOGIN_WAIT_TIMEOUT = 600
+# 扫码/手动操作最长等待时间（秒）。超时后脚本退出（浏览器窗口会随之关闭）。
+# 原为 600 秒：用户登录后顺手手动上传几条视频很容易超过 10 分钟，窗口会在
+# 操作中途被关掉；放宽到 30 分钟，并在 10 分钟时提前提醒一次。
+LOGIN_WAIT_TIMEOUT = 1800
 
 
 def _is_logged_in_url(url: str) -> bool:
@@ -265,6 +267,82 @@ def _finish(fh) -> None:
         pass
 
 
+def _acquire_profile(profile: str, tag: str, wait_s: float = 45.0):
+    """抢档案锁，并在等待期间**持续输出进度**。
+
+    为什么不用 `proclock.acquire(wait_s=45)` 一等了之：那样控制台会静默 45 秒，
+    用户看到的就是「点了没反应 / 卡住了」（真实反馈）。这里明确告知「谁占着、
+    还要等多久」，并且先判断占锁的是不是**自己刚开的登录窗口**——那种情况
+    等下去毫无意义（窗口一直开着就一直占着），直接引导用户去用那个窗口。
+
+    返回 (ok, holder)。
+    """
+    ok, holder = proclock.acquire(profile, tag, wait_s=0,
+                                  respect_pause=True, owner="manual")
+    if ok:
+        return True, None
+
+    pid = 0
+    try:
+        pid = int((holder or {}).get("pid") or 0)
+    except (TypeError, ValueError):
+        pid = 0
+    holder_tag = str((holder or {}).get("tag") or "")
+    alive = bool(pid) and proclock._pid_alive(pid)
+
+    if alive and holder_tag.startswith("打开发表页"):
+        # 已有同账号的登录窗口在跑：档案被它独占，重复打开必然失败。
+        print(f"[WARN] 该账号已有一个登录窗口在运行：{proclock.holder_desc(holder)}")
+        if _profile_holder_pid(profile):
+            print("[HINT] 浏览器窗口其实还开着——请直接切换到那个窗口扫码/操作。")
+            print("[HINT] 看不到窗口时，去任务栏里找 Edge / Chrome 图标（可能被控制台挡住了）。")
+            print("[HINT] 一个登录档案同时只能开一个窗口；用完关掉窗口后，本按钮即可再次使用。")
+            return False, {**(holder or {}), "_same_login": True}
+
+    if alive:
+        print(f"[WARN] 登录档案正被占用：{proclock.holder_desc(holder)}")
+    else:
+        print(f"[WARN] 登录档案被占用：{proclock.holder_desc(holder)}")
+    print(f"[INFO] 正在等待它释放（最多 {int(wait_s)} 秒，期间会持续提示）…")
+
+    t0 = time.time()
+    last_left = None
+    while time.time() - t0 < wait_s:
+        time.sleep(2)
+        left = int(wait_s - (time.time() - t0))
+        # 每 5 秒提示一次，避免刷屏又不会让控制台显得"死掉"
+        if last_left is None or last_left - left >= 5:
+            last_left = left
+            print(f"[WAIT] 仍在等待档案释放…剩余约 {left} 秒")
+        ok, holder = proclock.acquire(profile, tag, wait_s=0,
+                                      respect_pause=True, owner="manual")
+        if ok:
+            print("[INFO] 档案已释放，继续打开浏览器。")
+            return True, None
+    return False, holder
+
+
+def _resume_unless_window_open(account_id: str, profile: str) -> None:
+    """抢锁失败、提前退出时，不要把手动操作暂停标记留在那里。
+
+    面板点「扫码登录」时会先给账号打「手动操作中」暂停标记；如果本次窗口根本
+    没打开（档案被占用），标记会残留最长 30 分钟 —— 期间所有发布都会被拒绝
+    （真实发生过：扫码失败后 26 分钟内发布会一直提示「手动操作中」）。
+    但若确实有浏览器窗口在跑（用户正在操作），保留标记才是对的。
+    """
+    try:
+        if _profile_holder_pid(profile):
+            print("[INFO] 检测到浏览器窗口仍在运行，保留「手动操作中」标记。")
+            return
+    except Exception:
+        pass
+    try:
+        proclock.resume(account_id)
+        print("[INFO] 本次未打开窗口，已解除「手动操作中」标记（不影响后续发布）。")
+    except Exception:
+        pass
+
+
 def open_publish_page(account: dict | None = None, open_url: str | None = None) -> None:
     """启动一个【有头】浏览器，打开指定页面，等待扫码登录成功，直到用户关闭窗口。
 
@@ -291,11 +369,15 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
 
     # owner="manual"：这次打开本身就是「手动操作」，若面板已经为该账号打了
     # 暂停标记（点扫码登录时打的），要豁免自己——否则自己把自己拦在门外。
-    ok, holder = proclock.acquire(
-        profile, f"打开发表页（{aid}）", wait_s=45,
-        respect_pause=True, owner="manual",
-    )
+    ok, holder = _acquire_profile(profile, f"打开发表页（{aid}）", wait_s=45)
     if not ok:
+        # 同一个登录窗口占着档案：上面已经给出「去用那个窗口」的指引，
+        # 不要再抛那套「删锁文件」的建议——那是给真正的异常占用用的。
+        if (holder or {}).get("_same_login"):
+            _resume_unless_window_open(aid, profile)
+            _finish(fh)
+            time.sleep(6)
+            return
         print(f"[ERROR] 档案被占用：{proclock.holder_desc(holder)}")
         print("[HINT] 同一个浏览器档案不能被两个进程同时打开，此时硬开也拿不到登录态。")
         print("[HINT] 常见原因与处理：")
@@ -303,8 +385,11 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
         print("[HINT]   2) 另一个账号正在发布 → 稍等它结束，或到面板看发布进度")
         print("[HINT]   3) 该账号被标记为「手动操作中」但窗口已关 → 面板点「解除暂停」")
         print("[HINT]   4) 残留锁（进程被强杀）→ 删掉 state/profile_*.lock 后重试")
+        # ⚠️ 这里是 try/finally 之前的提前 return，不会走后面的 resume，
+        # 必须自己清理暂停标记，否则该账号最长 30 分钟内无法发布。
+        _resume_unless_window_open(aid, profile)
         _finish(fh)
-        time.sleep(6)      # 给用户看清报错再关窗
+        time.sleep(10)     # 给用户看清报错再关窗
         return
 
     try:
@@ -352,12 +437,17 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
             except Exception as e:
                 print(f"[WARN] 页面加载提示：{e}（窗口已打开，可直接手动操作）")
+            try:
+                print(f"[INFO] 当前地址：{page.url}")
+            except Exception:
+                pass
 
             print("[INFO] 若页面出现二维码，请用微信「扫一扫」扫码并在手机上确认登录。")
             print("[INFO] 登录成功后此窗口会提示；确认无误后直接关闭浏览器窗口即可。")
 
             # ---- 立刻回报「这个档案现在登的是哪个视频号」----
             # 这一步很关键：两个账号如果都登成了同一个视频号，面板上一眼就能看出来。
+            print("[INFO] 正在检测登录状态…")
             probe = loginprobe.probe(page)
             if probe.get("verified"):
                 print(f"[OK] ✅ 已登录，当前视频号：{probe.get('nickname')}")
@@ -374,6 +464,7 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
             # 等待：登录成功 或 用户关窗
             logged_notified = bool(probe.get("logged_in"))
             deadline = time.time() + LOGIN_WAIT_TIMEOUT
+            remind_at = time.time() + 600          # 10 分钟提醒一次
             while True:
                 time.sleep(2)
                 try:
@@ -408,8 +499,16 @@ def open_publish_page(account: dict | None = None, open_url: str | None = None) 
                     logged_notified = False
                     print("[WARN] 检测到退出登录，如需登录请重新扫码。")
 
+                if remind_at and time.time() > remind_at:
+                    remind_at = None
+                    print(f"[INFO] 已等待 10 分钟。窗口会一直保留，"
+                          f"最多 {LOGIN_WAIT_TIMEOUT // 60} 分钟后脚本会自动关闭它。")
+
                 if time.time() > deadline:
-                    print("[INFO] 已等待较长时间，脚本退出（浏览器窗口仍保留，可继续手动使用）。")
+                    # ⚠️ 这里必须如实说「窗口会被关闭」：脚本退出时 persistent
+                    # context 随之关闭，窗口不会"保留"（旧文案写反了）。
+                    print(f"[INFO] 已等待 {LOGIN_WAIT_TIMEOUT // 60} 分钟，"
+                          f"自动结束并关闭浏览器窗口；如需继续请重新点「扫码登录」。")
                     break
 
             try:

@@ -139,6 +139,7 @@
   background:rgba(59,130,246,.12);color:var(--acc);border:1px solid rgba(59,130,246,.3)}
 .msg.ok{background:rgba(34,197,94,.12);color:var(--ok);border-color:rgba(34,197,94,.3)}
 .msg.bad{background:rgba(239,68,68,.12);color:var(--bad);border-color:rgba(239,68,68,.3)}
+.msg.warn{background:rgba(245,158,11,.13);color:var(--warn);border-color:rgba(245,158,11,.32)}
 /* 空状态占位 */
 .empty{padding:22px;text-align:center;color:var(--mut);border:1px dashed var(--line);border-radius:10px}
 .ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

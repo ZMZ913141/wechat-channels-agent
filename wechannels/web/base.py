@@ -11,11 +11,13 @@ IDE 也无法给 HTML/JS 做语法高亮。
     web/templates/*.html   真正的 Jinja2 模板
     web/static/*           CSS / JS 独立文件（可被浏览器缓存）
 """
+import logging
 import os
 
-from flask import Flask
+from flask import Flask, jsonify, request
 
 from .. import config
+from .. import logconf  # 确保日志系统可用
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,6 +34,32 @@ app.config["JSON_AS_ASCII"] = False
 # ⚠️ 若将来要改host="0.0.0.0" 让局域网访问，**必须先加鉴权**——
 # /media 与 /serve 会直接读本地文件，暴露出去等于任意文件读取。
 app.config["MAX_CONTENT_LENGTH"] = 2048 * 1024 * 1024  # 单次上传上限 2GB
+
+
+_log = logging.getLogger("wechannels")
+
+
+@app.errorhandler(500)
+def _handle_500(err):
+    """未处理异常统一兜底。
+
+    作用：
+    1. 记到 app.log（带堆栈），出问题能溯源；
+    2. 返回 JSON 而非 HTML —— 否则前端 fetch().json() 会吞到一段 500 页面
+       直接解析失败（正是「操作丝滑」的大敌）。
+
+    浏览器直接访问页面时拿到的是 500 + JSON，用户体验稍差但至少不会崩成白屏。
+    """
+    _log.exception("未处理异常（500）: %s", err)
+    # 区分「要 JSON 的接口」和「要 HTML 的页面」：接口给 JSON，页面给简单文案
+    wants_json = (
+        request.path.startswith("/api")
+        or (request.accept_mimetypes and request.accept_mimetypes.accept_json)
+        or "application/json" in (request.headers.get("Accept") or "")
+    )
+    if wants_json:
+        return jsonify(ok=False, error=str(err) or "internal_error"), 500
+    return ("服务器内部错误，请查看运行日志 app.log 获取详情。", 500)
 
 
 @app.context_processor

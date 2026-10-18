@@ -483,6 +483,45 @@ def test_views_smoke():
 
 
 # ===========================================================================
+# 13.5) 安全/健壮性加固回归：/media 防穿越 + 500 处理器返回 JSON
+# ===========================================================================
+def test_hardening():
+    print("[安全/健壮性加固]")
+    from app import app as _app
+    # 注意：不能设 TESTING=True —— 否则测试客户端会直接把异常抛出，
+    # 500 处理器就不会被触发，无法验证「返回 JSON」这一行为。
+    _app.config["TESTING"] = False
+    c = _app.test_client()
+
+    # 必须在首次请求前注册探针路由（Flask 首次请求后禁止再改路由）
+    @_app.route("/__probe_500_harden")
+    def _p500():
+        raise RuntimeError("探针错误")
+
+    # 1) /media 拒绝父目录穿越（任意文件读取防护）
+    rv = c.get("/media/../../Windows/win.ini")
+    ck("/media 拒绝 .. 穿越 → 400", rv.status_code == 400, f"status={rv.status_code}")
+    rv = c.get("/media/..%2f..%2fetc%2fpasswd")
+    ck("/media 拒绝编码穿越 → 400", rv.status_code == 400, f"status={rv.status_code}")
+
+    # 2) 500 处理器：API 请求返回 JSON（避免前端 fetch().json() 拿到 HTML 崩）
+    rv = c.get("/__probe_500_harden", headers={"Accept": "application/json"})
+    ck("500 处理器(API) 返回 JSON", rv.status_code == 500 and rv.is_json,
+       f"status={rv.status_code} ct={rv.content_type}")
+    try:
+        d = rv.get_json()
+        ck("500 JSON 含 ok=False", bool(d) and d.get("ok") is False)
+    except Exception:
+        ck("500 JSON 可解析", False)
+
+    # 3) 500 处理器：页面请求返回可读文案而非裸堆栈
+    rv = c.get("/__probe_500_harden", headers={"Accept": "text/html"})
+    ck("500 处理器(页面) 返回文本", rv.status_code == 500
+       and "服务器内部错误" in rv.get_data(as_text=True),
+       f"status={rv.status_code}")
+
+
+# ===========================================================================
 # 14) media 服务：Range 解析（含开放区间 bytes=0-）
 # ===========================================================================
 def test_media_service():
@@ -520,6 +559,7 @@ if __name__ == "__main__":
     test_media_probe()
     test_migrate()
     test_proclock()
+    test_hardening()
     test_views_smoke()
     test_media_service()
 

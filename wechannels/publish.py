@@ -16,6 +16,7 @@
 """
 import asyncio
 import json
+import logging
 import os
 import threading
 import time
@@ -24,6 +25,8 @@ from browser_use import Agent
 
 from . import accounts, config, ledger, materials, proclock
 from .browser import get_browser, get_llm
+
+_log = logging.getLogger("wechannels")
 
 # 账号级任务锁等待时长（秒）。同账号并发发布时，后到者最多等这么久；
 # 默认0 = 不等，直接明确报错让用户稍后重试（避免用户干等）。
@@ -220,6 +223,7 @@ def read_job() -> dict | None:
 def _run_job(mat: dict, accs: list, overrides: dict | None = None,
              batch_id: str = "") -> None:
     results = []
+    _log.info("发布任务开始：素材=%s 账号数=%d batch=%s", mat.get("id"), len(accs), batch_id)
     for acc in accs:
         _update_account_status(acc["id"], "发布中…", "")
         # ---- 写入 ledger（数据看板的数据源）----
@@ -235,6 +239,8 @@ def _run_job(mat: dict, accs: list, overrides: dict | None = None,
             results.append((acc, False, str(e)))
             text = str(e)
             _update_account_status(acc["id"], "❌ 失败", str(e))
+            _log.exception("发布单个账号失败：账号=%s 素材=%s：%s",
+                           acc.get("name"), mat.get("id"), e)
 
         dur_ms = int((time.time() - t0) * 1000)
         if batch_id:
@@ -276,6 +282,7 @@ def _run_job(mat: dict, accs: list, overrides: dict | None = None,
     summary = "\n".join(lines)
     # 结果同时用于面板「发布中心」展示与落盘存档
     print(f"[INFO] 同步发布汇总：\n{summary}")
+    _log.info("发布任务结束：成功 %d/%d\n%s", ok_count, len(results), summary)
 
     if ok_count == len(results) and results:
         materials.set_status(mat["id"], "已发布")
@@ -333,11 +340,14 @@ def publish_one_account(acc: dict, mat: dict, overrides: dict | None = None) -> 
 
                 ok, text = publish_deterministic(acc, mat, overrides)
                 print(f"[INFO] 确定性发布：账号「{acc['name']}」→ {text[:80]}")
+                _log.info("确定性发布：账号=%s → %s", acc.get("name"), text[:120])
                 return ok, text
             except PublishFlowError as e:
                 print(f"[WARN] 确定性流程无法完成（{e}），回退 Agent 方案…")
+                _log.warning("确定性流程无法完成，回退 Agent：账号=%s 原因=%s", acc.get("name"), e)
             except Exception as e:
                 print(f"[WARN] 确定性发布异常（{e}），回退 Agent 方案…")
+                _log.warning("确定性发布异常，回退 Agent：账号=%s 异常=%s", acc.get("name"), e)
             if not config.PUBLISH_AUTO_FALLBACK:
                 return False, "确定性发布未成功，且已关闭自动回退（.env PUBLISH_AUTO_FALLBACK=false）"
         return asyncio.run(publish_to_account(acc, mat, overrides=overrides))
@@ -362,6 +372,7 @@ async def publish_to_account(acc: dict, mat: dict, max_retries: int = 1, overrid
         except Exception as e:
             last_err = e
             print(f"[WARN] 账号「{acc['name']}」发布 agent 第 {attempt + 1} 次运行失败: {e}")
+            _log.warning("Agent 发布第 %d 次失败：账号=%s：%s", attempt + 1, acc.get("name"), e)
     try:
         await browser.close()
     except Exception:

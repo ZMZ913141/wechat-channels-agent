@@ -1,6 +1,7 @@
 """首页与素材库路由。"""
 import html
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -15,6 +16,8 @@ from .. import (accounts, backup, config, ledger, login_state, materials,
 from . import exporters
 from .base import app, BASE_DIR
 from .templating import decorate
+
+_log = logging.getLogger("wechannels")
 
 
 def _cur():
@@ -718,8 +721,16 @@ def media_file(name):
 
     ⚠️ 这条路由等于开放了任意文件读取。之所以可接受：本工具只绑 127.0.0.1、
     单机自用。若将来要改host="0.0.0.0" 暴露到局域网，必须先加鉴权。
+
+    安全基线：拒绝任何「父目录穿越」（`..`）与异常前缀，避免被利用去读
+    素材目录之外的文件。合法媒体 URL 由 templating.media_url 生成，
+    只会是「盘符:绝对路径」且不含 `..`，不受影响。
     """
     import mimetypes
+
+    if not name or ".." in name.split("/") or name.startswith("/") or name.startswith("\\"):
+        _log.warning("拒绝可疑的 /media 请求（疑似路径穿越）: %r", name)
+        return ("非法路径", 400)
 
     ap = os.path.abspath(name.replace("/", os.sep))
     if not os.path.isfile(ap):

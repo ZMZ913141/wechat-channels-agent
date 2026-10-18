@@ -10,6 +10,7 @@
 本文件只负责「装配 + 启动」，不再包含任何业务逻辑。
 """
 import argparse
+import logging
 import os
 import sys
 
@@ -58,6 +59,8 @@ def main():
         print("=" * 60)
 
     from wechannels import accounts, backup, config
+    from wechannels import logconf
+    logconf.setup_logging()
 
     _migrate_legacy_once()
 
@@ -69,11 +72,14 @@ def main():
         print(f"[WARN] 自动备份失败（不影响使用）：{str(e)[:60]}")
 
     accs = accounts.load_accounts()
+    _log = logging.getLogger("wechannels")
     print(f"· 账号数：{len(accs)}  当前：{accounts.current_account_id()}")
     print(f"· 发布方式：{config.PUBLISH_METHOD}（deterministic=零 token / agent=依赖 LLM）")
     print(f"· 发布窗口：{'无头后台（不弹窗）' if config.PUBLISH_HEADLESS else '有头（可肉眼确认）'}")
     print(f"· 面板地址： http://{args.host}:{args.port}")
+    print(f"· 运行日志： {config.STATE_DIR}/app.log")
     print("· 停止： Ctrl+C\n")
+    _log.info("面板启动 host=%s port=%s accounts=%d", args.host, args.port, len(accs))
     app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 
 

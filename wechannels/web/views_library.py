@@ -7,6 +7,7 @@ from flask import redirect, render_template, request, url_for
 
 from .. import accounts, materials
 from .base import app
+from .templating import media_url
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +80,7 @@ def library_archive():
 @app.route("/import")
 def import_page():
     d = request.args.get("dir", "")
+    recursive = request.args.get("recursive", "1") not in ("0", "false", "off")
     msg = ""
     done = request.args.get("done", "")
     skipped = request.args.get("skip", "")
@@ -89,34 +91,69 @@ def import_page():
             msg += (f'<div class="muted">自动跳过 {skipped} 个已导入过的重复文件'
                     f'{("：" + html.escape(names)) if names else ""}</div>')
     files_html = ""
+    groups = []
+    depth_hit = False
     if d and os.path.isdir(os.path.abspath(os.path.expanduser(d))):
-        files = materials.list_dir_videos(d)
-        if files:
+        res = materials.scan_import_dir(d, recursive=recursive)
+        groups = res["groups"]
+        depth_hit = res["depth_hit"]
+        if groups:
             rows = "".join(
-                f'<label class="frow"><input type="checkbox" name="files" value="{html.escape(f["name"])}" '
-                f'onchange="updateBar()"><span class="fname">{html.escape(f["name"])}</span>'
-                f'<span class="fsize">{f["size_mb"]} MB</span>'
-                f'<span class="ftime">{f["mtime"]}</span></label>'
-                for f in files
+                _import_row(g) for g in groups
             )
             files_html = (
-                '<form method="post" action="/import/do">'
-                f'<input type="hidden" name="dir" value="{html.escape(d)}">'
+                '<form method="post" action="/import/do" id="impForm">'
+                '<input type="hidden" name="dir" value="' + html.escape(d) + '">'
+                '<input type="hidden" name="recursive" value="' + ("1" if recursive else "0") + '">'
                 '<div class="filelist">'
-                '<div class="fhead"><span></span><span>文件名</span>'
-                '<span class="fsize">大小</span><span class="ftime">修改时间</span></div>'
+                '<div class="fhead"><span></span><span>封面</span><span>文件名</span>'
+                '<span class="fsize">大小</span><span class="ftime">修改时间</span>'
+                '<span>所在子目录</span></div>'
                 f'{rows}</div>'
                 '<div class="listbar">'
                 '<a class="btn ghost" href="javascript:toggleAll()">全选/全不选</a>'
-                '<span class="muted" id="counter">已选 0 / {len(files)}</span>'
-                '<button class="btn" type="submit">导入选中</button>'
+                '<span class="muted" id="counter">已选 0 / {0}</span>'.format(len(groups))
+                + '<button class="btn" type="submit">导入选中（自动带封面）</button>'
                 "</div></form>"
             )
+            if depth_hit:
+                files_html += ('<div class="warnbox" style="margin-top:8px">'
+                               '⚠ 扫描深度已达上限（4 层），更深的子目录未纳入，'
+                               '可把目录路径选得更靠近视频再扫。</div>')
         else:
             files_html = '<div class="empty">该目录下没有支持的视频文件</div>'
     return render_template(
-        "import.html", dir=d, msg=msg, files_html=files_html,
-        title="目录导入",
+        "import.html", dir=d, recursive=recursive, msg=msg, files_html=files_html,
+        groups=groups, title="目录导入",
+    )
+
+
+def _import_row(g: dict) -> str:
+    """渲染一条导入分组：封面缩略图 + 文件信息 + 封面匹配徽标。"""
+    name = html.escape(g["name"])
+    size = g["size_mb"]
+    mtime = html.escape(g["mtime"])
+    folder = html.escape(g["folder"])
+    vp = html.escape(g["video_path"])
+    # 重复项默认不勾选（避免重复导入）；新文件默认勾选
+    checked = "" if g["dup"] else "checked"
+    dup_badge = '<span class="warnbox" style="font-size:11px;padding:1px 6px">已导入</span>' if g["dup"] else ""
+    if g["cover_path"]:
+        thumb = (f'<img class="fcover" src="{html.escape(media_url(g["cover_path"]))}" '
+                 f'alt="封面" loading="lazy">')
+        cover_badge = '<span class="okbox" style="font-size:11px;padding:1px 6px">封面✓</span>'
+    else:
+        thumb = '<div class="fcover fcover-empty">无</div>'
+        cover_badge = '<span class="muted" style="font-size:11px">封面前往编辑页抓取</span>'
+    return (
+        f'<label class="frow{" dup" if g["dup"] else ""}">'
+        f'<input type="checkbox" name="files" value="{vp}" {checked} onchange="updateBar()">'
+        f'<span class="fcover-cell">{thumb}</span>'
+        f'<span class="fname">{name}<br>{cover_badge} {dup_badge}</span>'
+        f'<span class="fsize">{size} MB</span>'
+        f'<span class="ftime">{mtime}</span>'
+        f'<span class="fdir">{folder}</span>'
+        '</label>'
     )
 
 
@@ -126,17 +163,20 @@ def import_do():
     files = request.form.getlist("files")
     paths_raw = request.form.get("paths", "")
     skip_dup = request.form.get("skip_dup", "1") not in ("0", "false", "off")
+    # 始终尝试自动匹配封面：导入时把同级封面一并写进素材
+    with_cover = request.form.get("with_cover", "1") not in ("0", "false", "off")
     added = 0
     skipped = 0
     names = []
-    if files and d:
-        r = materials.import_from_dir(d, files, skip_duplicates=skip_dup)
+    if files:
+        r = materials.import_paths(files, skip_duplicates=skip_dup, with_cover=with_cover)
         added += r["added"]; skipped += r["skipped"]; names += r["skipped_names"]
     if paths_raw.strip():
         paths = [ln.strip() for ln in paths_raw.splitlines() if ln.strip()]
-        r = materials.import_paths(paths, skip_duplicates=skip_dup)
+        r = materials.import_paths(paths, skip_duplicates=skip_dup, with_cover=with_cover)
         added += r["added"]; skipped += r["skipped"]; names += r["skipped_names"]
     # 「跳过了几个重复」必须如实回报，否则用户会以为导入失败了
     return redirect(
-        f"/import?dir={quote(d)}&done={added}&skip={skipped}&names={quote('、'.join(names[:5]))}"
+        f"/import?dir={quote(d)}&recursive={request.form.get('recursive','1')}"
+        f"&done={added}&skip={skipped}&names={quote('、'.join(names[:5]))}"
     )

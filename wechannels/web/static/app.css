@@ -95,10 +95,19 @@
   .abadge.orig{background:rgba(34,197,94,.15);color:var(--ok)}
   .abadge.sched{background:rgba(59,130,246,.15);color:var(--acc)}
   .batchbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
-  .filelist{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:8px}
-  .filelist label{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);margin:0;color:var(--fg);font-size:13px;cursor:pointer}
+  .filelist{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:8px}
+  .filelist label{display:grid;grid-template-columns:auto 54px minmax(140px,1.4fr) auto auto minmax(80px,1fr);align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid var(--line);margin:0;color:var(--fg);font-size:13px;cursor:pointer}
   .filelist label:hover{background:var(--elev)}
+  .filelist label.dup{opacity:.62}
+  .filelist label.dup .fname{text-decoration:line-through}
+  .filelist .fhead{font-size:11px;color:var(--mut);background:var(--elev);position:sticky;top:0;z-index:1;border-bottom:1px solid var(--line)}
+  .filelist .fcover{width:50px;height:50px;object-fit:cover;border-radius:6px;background:var(--elev);display:block}
+  .filelist .fcover-empty{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:11px;border:1px dashed var(--line)}
+  .filelist .fcover-cell{display:flex;align-items:center;justify-content:center}
+  .filelist .fname{word-break:break-all;line-height:1.5}
+  .filelist .fdir{color:var(--mut);font-size:12px;word-break:break-all}
   .filelist .meta{color:var(--mut);font-size:11px;margin-left:auto}
+  .okbox{display:inline-block;background:rgba(34,197,94,.15);color:var(--ok);border-radius:6px;line-height:1.6}
   .check-mat{position:absolute;top:8px;left:8px;z-index:2;transform:scale(1.3);cursor:pointer}
   .mcard{position:relative;overflow:hidden}
   /* 分类标签 chip：与话题 tag(#xxx) 视觉上明确区分 —— 实心可点击=管理，空心灰=话题 */

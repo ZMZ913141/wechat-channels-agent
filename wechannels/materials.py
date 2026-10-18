@@ -27,6 +27,8 @@ STATUSES = ["待发布", "草稿", "发布中", "已发布", "失败", "已归�
 MEDIA_EXTS = {"mp4", "webm", "mov", "m4v", "jpg", "jpeg", "png", "gif", "webp"}
 # 视频文件扩展名（本地目录导入用）
 VIDEO_EXTS = {"mp4", "mov", "m4v", "webm", "avi", "mkv", "flv", "ts"}
+# 封面图扩展名（本地目录导入时自动匹配封面用）
+COVER_EXTS = {"jpg", "jpeg", "png", "gif", "webp", "bmp"}
 # AI 内容声明选项（依据《人工智能生成合成内容标识办法》2025-09-01 施行，
 # AI 生成合成内容发布时必须主动声明，否则会被平台限流/下架/处罚）
 AI_DECLARE_OPTIONS = ["", "内容为AI制作", "内容为虚构剧情", "非AI内容"]
@@ -554,11 +556,12 @@ def list_dir_videos(dir_path: str) -> list:
 
 
 def import_from_dir(dir_path: str, filenames: list, account_id: str | None = None,
-                     skip_duplicates: bool = True) -> dict:
+                     skip_duplicates: bool = True, with_cover: bool = False) -> dict:
     """把本地目录里的若干视频批量导入素材库（标题默认取文件名）。
 
     skip_duplicates=True 时自动跳过已导入过的文件（按文件名+大小指纹判断），
     避免反复点导入堆出一堆重复条目。
+    with_cover=True 时，为每个视频自动匹配同级封面写进 cover_path。
     返回 {"added": n, "skipped": m, "skipped_names": [...]}
     """
     aid = account_id or accounts.current_account_id()
@@ -579,7 +582,10 @@ def import_from_dir(dir_path: str, filenames: list, account_id: str | None = Non
             skipped.append(fn)
             continue
         title = os.path.splitext(fn)[0]
-        add_material({"title": title, "video_path": fp, "status": "待发布"}, account_id=aid)
+        data = {"title": title, "video_path": fp, "status": "待发布"}
+        if with_cover:
+            data["cover_path"] = match_cover_for_video(fp)
+        add_material(data, account_id=aid)
         if fpr:
             existing.add(fpr)
         n += 1
@@ -587,9 +593,10 @@ def import_from_dir(dir_path: str, filenames: list, account_id: str | None = Non
 
 
 def import_paths(paths: list, account_id: str | None = None,
-                 skip_duplicates: bool = True) -> dict:
+                 skip_duplicates: bool = True, with_cover: bool = False) -> dict:
     """按完整文件路径批量导入（每行一个路径，支持任意位置）。
 
+    with_cover=True 时，为每个视频自动匹配同级封面写进 cover_path。
     返回 {"added": n, "skipped": m, "skipped_names": [...]}
     """
     aid = account_id or accounts.current_account_id()
@@ -613,11 +620,141 @@ def import_paths(paths: list, account_id: str | None = None,
             skipped.append(os.path.basename(p))
             continue
         title = os.path.splitext(os.path.basename(p))[0]
-        add_material({"title": title, "video_path": p, "status": "待发布"}, account_id=aid)
+        data = {"title": title, "video_path": p, "status": "待发布"}
+        if with_cover:
+            data["cover_path"] = match_cover_for_video(p)
+        add_material(data, account_id=aid)
         if fpr:
             existing.add(fpr)
         n += 1
     return {"added": n, "skipped": len(skipped), "skipped_names": skipped}
+
+
+# ===========================================================================
+# 封面自动匹配：从本地目录导入时，把"同级的封面图"一并带进素材
+# ===========================================================================
+def match_cover_for_video(video_path: str) -> str:
+    """为某视频在**同级目录**里找对应的封面图。
+
+    匹配优先级（实测用户目录结构：视频 X.mp4 配同名的 X-封面.jpg）：
+      1) 同名 + 「-封面」/「封面」后缀的图片（X-封面.jpg / X封面.png）——
+         这是最精确的，优先命中。
+      2) 同级目录里文件名含「封面」的图片（取最短的那个，越短越可能是同名封面）。
+      3) 同级目录里**唯一**的一张图片（排除视频本身）——兜底：有些用户只放
+         了一个图和视频，那就默认它是封面。
+    找不到返回 ""。
+
+    ⚠️ 为什么不直接用"任意图片"当封面：一个目录里可能有花絮/过程截图，
+    误把花絮当封面发布出去是真实事故。所以同名/含"封面"字样的优先，
+    只有"恰好一张图"才兜底。
+    """
+    vp = (video_path or "").strip()
+    if not vp or not os.path.isfile(vp):
+        return ""
+    folder = os.path.dirname(vp)
+    stem = os.path.splitext(os.path.basename(vp))[0]
+    try:
+        entries = os.listdir(folder)
+    except OSError:
+        return ""
+    imgs = []
+    for fn in entries:
+        fp = os.path.join(folder, fn)
+        if not os.path.isfile(fp):
+            continue
+        ext = fn.rsplit(".", 1)[-1].lower() if "." in fn else ""
+        if ext not in COVER_EXTS:
+            continue
+        imgs.append(fn)
+    if not imgs:
+        return ""
+    # 1) 同名 + 封面后缀
+    for fn in imgs:
+        s = os.path.splitext(fn)[0]
+        if s == stem + "-封面" or s == stem + "封面":
+            return os.path.join(folder, fn)
+    # 2) 文件名含「封面」（取最短，越短越接近同名封面）
+    cover_hits = [fn for fn in imgs if "封面" in fn]
+    if cover_hits:
+        cover_hits.sort(key=lambda f: len(f))
+        return os.path.join(folder, cover_hits[0])
+    # 3) 唯一一张图 → 兜底
+    if len(imgs) == 1:
+        return os.path.join(folder, imgs[0])
+    return ""
+
+
+def scan_import_dir(root: str, recursive: bool = True, max_depth: int = 4,
+                    account_id: str | None = None,
+                    skip_duplicates: bool = True) -> dict:
+    """递归扫描本地目录，列出所有视频并为其匹配封面。
+
+    与 `list_dir_videos`（只扫单层、不带封面）相比，本函数：
+      - 递归进入子目录（用户素材常按 `日期/款式名/` 组织）；
+      - 每个视频自动调用 `match_cover_for_video` 找同级封面；
+      - 返回分组列表，每个分组带 `cover_path`（匹配不到为 ""）与 `dup`（是否已导入过）。
+
+    返回 {"groups": [...], "skipped_names": [...], "total": n, "depth_hit": bool}
+      group = {video_path, cover_path, name, title, size_mb, mtime, folder, dup}
+    """
+    ap = os.path.abspath(os.path.expanduser(root.strip()))
+    if not os.path.isdir(ap):
+        return {"groups": [], "skipped_names": [], "total": 0, "depth_hit": False}
+    existing = set()
+    if skip_duplicates:
+        for it in load_materials(account_id):
+            vp = (it.get("video_path") or "").strip()
+            if vp:
+                existing.add(file_fingerprint(vp))
+    groups, skipped = [], []
+    depth_hit = False
+
+    def walk(dirpath: str, depth: int):
+        nonlocal depth_hit
+        try:
+            entries = sorted(os.listdir(dirpath))
+        except OSError:
+            return
+        # 本层视频
+        for fn in entries:
+            fp = os.path.join(dirpath, fn)
+            if not os.path.isfile(fp):
+                continue
+            ext = fn.rsplit(".", 1)[-1].lower() if "." in fn else ""
+            if ext not in VIDEO_EXTS:
+                continue
+            fpr = file_fingerprint(fp)
+            dup = bool(fpr and fpr in existing)
+            if dup:
+                skipped.append(fn)
+                # 已导入过的也展示，但标记为重复（导入时会被跳过），方便核对
+            try:
+                st = os.stat(fp)
+            except OSError:
+                st = None
+            groups.append({
+                "video_path": fp,
+                "cover_path": match_cover_for_video(fp),
+                "name": fn,
+                "title": os.path.splitext(fn)[0],
+                "size_mb": round(st.st_size / 1048576, 1) if st else 0,
+                "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)) if st else "",
+                "folder": os.path.basename(dirpath),
+                "dup": dup,
+            })
+        # 递归进入子目录
+        if recursive and depth < max_depth:
+            for dn in entries:
+                sub = os.path.join(dirpath, dn)
+                if os.path.isdir(sub):
+                    walk(sub, depth + 1)
+        elif depth >= max_depth:
+            depth_hit = True
+
+    walk(ap, 0)
+    groups.sort(key=lambda g: (g["mtime"], g["name"]), reverse=True)
+    return {"groups": groups, "skipped_names": skipped,
+            "total": len(groups), "depth_hit": depth_hit}
 
 
 def copy_text(material: dict) -> str:

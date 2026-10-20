@@ -68,11 +68,23 @@ def publish_page():
             blocked.append(why)
             blocked_ids.add(aid)
 
+    ena = [a for a in accounts.load_accounts() if a.get("enabled", True)]
+    # 按账号差异化：为每个账号预先拼好「继承素材默认 + 叠加该账号已存差异」的填充值，
+    # 模板里直接把值塞进输入框；勾选某账号时才显示它的专属配置卡片。
+    accvars = []
+    for a in ena:
+        base = {f: (mat.get(f) if mat else "") for f in materials.VARIANT_FIELDS}
+        var = materials.material_variant(mat, a["id"]) if mat else {}
+        base.update(var)
+        accvars.append((a, base))
+
     return render_template(
         "publish.html",
         mat=decorate(mat) if mat else None,
         valid=valid,
-        accounts=[a for a in accounts.load_accounts() if a.get("enabled", True)],
+        accounts=ena,
+        accvars=accvars,
+        accids=[a["id"] for a in ena],
         cur_account_id=acc_id,
         ai_opts=[v for v in materials.AI_DECLARE_OPTIONS if v != "非AI内容"],
         vis_opts=materials.VISIBILITY_OPTIONS,
@@ -80,8 +92,7 @@ def publish_page():
         probe_html=probe_html,
         blocked=blocked,
         blocked_ids=sorted(blocked_ids),
-        usable_ids=[a["id"] for a in accounts.load_accounts()
-                    if a.get("enabled", True) and a["id"] not in blocked_ids],
+        usable_ids=[a["id"] for a in ena if a["id"] not in blocked_ids],
         job=read_job(),
         collections=materials.load_collections(),
         all_collections=materials.collection_names(),
@@ -110,35 +121,80 @@ def publish_status():
     return resp
 
 
-@app.route("/publish/start", methods=["POST"])
-def publish_start():
+def parse_publish_form(r) -> dict:
+    """把发布页表单解析成结构化参数，便于单测（不依赖真实请求/线程）。
+
+    返回 {mids, acc_ids, overrides(全局覆盖), variants(按账号差异), stagger_minutes}
+    variants 只针对「被勾选」的账号构建，避免把未选账号的隐藏字段带进去。
+    """
     # 素材：发布页表单提交的是单选 <select name="material_id">，
     # 但这里原本只读 material_ids（复数）→ 永远读不到，点了发布直接报
     # 「请先选择要发布的素材」。两种名字都兼容，避免再被字段名不一致坑一次。
-    mids = (request.form.getlist("material_ids")
-            or ([request.form.get("material_id")] if request.form.get("material_id") else []))
+    mids = (r.form.getlist("material_ids")
+            or ([r.form.get("material_id")] if r.form.get("material_id") else []))
     mids = [m for m in mids if m]
-    acc_ids = [a for a in request.form.getlist("accounts") if a]
+    acc_ids = [a for a in r.form.getlist("accounts") if a]
+
     overrides = {
-        "short_title": (request.form.get("short_title") or "").strip(),
-        "desc": (request.form.get("desc") or "").strip(),
-        "tags": (request.form.get("tags") or "").strip(),
-        "ai_declare": request.form.get("ai_declare", ""),
-        "original": request.form.get("original", ""),
-        "visibility": request.form.get("visibility", "公开"),
-        "scheduled_at": (request.form.get("scheduled_at") or "").strip(),
-        "ext_link": (request.form.get("ext_link") or "").strip(),
-        "cover_path": (request.form.get("cover_path") or "").strip(),
-        "collection": (request.form.get("collection") or "").strip(),
+        "short_title": (r.form.get("short_title") or "").strip(),
+        "desc": (r.form.get("desc") or "").strip(),
+        "tags": (r.form.get("tags") or "").strip(),
+        "ai_declare": r.form.get("ai_declare", ""),
+        "original": r.form.get("original", ""),
+        "visibility": r.form.get("visibility", "公开"),
+        "scheduled_at": (r.form.get("scheduled_at") or "").strip(),
+        "ext_link": (r.form.get("ext_link") or "").strip(),
+        "cover_path": (r.form.get("cover_path") or "").strip(),
+        "collection": (r.form.get("collection") or "").strip(),
     }
+
+    # 按账号差异化：每个被勾选的账号，收集其 ov_<field>_<aid> 覆盖项
+    variants: dict = {}
+    for aid in acc_ids:
+        sub = {}
+        for f in materials.VARIANT_FIELDS:
+            val = (r.form.get(f"ov_{f}_{aid}") or "").strip()
+            if val:
+                sub[f] = val
+        if sub:
+            variants[aid] = sub
+
+    try:
+        stagger_minutes = int(float(r.form.get("stagger_minutes") or 0))
+    except (TypeError, ValueError):
+        stagger_minutes = 0
+    if stagger_minutes < 0:
+        stagger_minutes = 0
+
+    return {
+        "mids": mids,
+        "acc_ids": acc_ids,
+        "overrides": overrides,
+        "variants": variants,
+        "stagger_minutes": stagger_minutes,
+    }
+
+
+@app.route("/publish/start", methods=["POST"])
+def publish_start():
+    p = parse_publish_form(request)
+    mids, acc_ids = p["mids"], p["acc_ids"]
+    overrides, variants, stagger_minutes = p["overrides"], p["variants"], p["stagger_minutes"]
     if not mids:
         return redirect(url_for("publish_page", err="请先选择要发布的素材"))
     if not acc_ids:
         return redirect(url_for("publish_page", err="请至少选择一个发布账号"))
+    # 保存「按账号差异化」配置（可复用：下次发同一条素材到同批账号时记得上次的分化）
+    for mid in mids:
+        try:
+            materials.set_variants(mid, variants)
+        except Exception:
+            pass
     try:
         # 逐个素材依次发布（单任务线程内串行，避免多号并发抢带宽与风控）
         for mid in mids:
-            start_publish_job(mid, acc_ids, overrides)
+            start_publish_job(mid, acc_ids, overrides,
+                              variants=variants, stagger_minutes=stagger_minutes)
     except ValueError as e:
         return redirect(url_for("publish_page", err=str(e)))
     # 带上 material 参数：发布后回到页面时仍停在同一条素材，不用重新找

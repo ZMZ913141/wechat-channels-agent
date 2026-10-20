@@ -23,6 +23,14 @@ HEADLESS = _get("HEADLESS", "false").lower() == "true"
 # 抗检测 / 拟人（来自 browser-use 生产可靠性实践）：
 # 浏览器渠道：留空=用 Playwright 自带的 Chromium；设为 chrome/edge 可复用本机已装浏览器，指纹更一致、更不易被识别为自动化
 BROWSER_CHANNEL = _get("BROWSER_CHANNEL", "")
+# 浏览器后端：auto = 沿用现有 Playwright/browser-use 逻辑（默认，已验证稳定、零配置开箱即用）；
+# custom = 若下面配置了可用的 Playwright 兼容内核路径，则优先用它作为启动内核。
+# ⚠️ 重要：ego-lite 本体是 Electron 应用，并不是 Playwright 可直接驱动的内核，
+# 无法作为本工具的自动化登录浏览器（其价值在于「人+Agent 共享浏览」的手动场景）。
+# 此项仅用于接入「任意 Playwright 兼容内核」的自定义路径（例如自行指定的 Chromium）。
+BROWSER_BACKEND = _get("BROWSER_BACKEND", "auto")
+# 显式指定一个 Playwright 兼容的浏览器可执行文件绝对路径（留空 = 自动探测常见位置）。
+CUSTOM_BROWSER_PATH = _get("CUSTOM_BROWSER_PATH", "")
 # 每次操作之间的随机拟人延时（秒），降低被风控的概率；0 表示不设置
 WAIT_BETWEEN_ACTIONS = float(_get("WAIT_BETWEEN_ACTIONS", "1.0"))
 # 可选：自定义 User-Agent（留空则用浏览器默认）

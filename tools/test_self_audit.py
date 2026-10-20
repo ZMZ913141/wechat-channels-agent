@@ -649,6 +649,188 @@ def test_media_service():
         shutil.rmtree(tmp)
 
 
+# ===========================================================================
+# 16) 按账号差异化：variants 存储 + 合并 + 冗余剔除
+# ===========================================================================
+def test_materials_variants():
+    print("[按账号差异化 · variants 存储/合并]")
+    aid = "default"
+    tmp = tempfile.mkdtemp()
+    try:
+        vid = os.path.join(tmp, "v.mp4")
+        open(vid, "wb").write(b"x")
+        m = materials.add_material(
+            {"title": "pa", "video_path": vid, "desc": "全局描述", "original": True},
+            account_id=aid,
+        )
+        accA = accounts.add_account({"id": "pa_a", "name": "A"})
+        accB = accounts.add_account({"id": "pa_b", "name": "B"})
+
+        # 保存差异化：A 改描述+封面，B 改描述
+        materials.set_variants(m["id"], {
+            accA["id"]: {"desc": "A专属描述", "cover_path": "C:\\a.png"},
+            accB["id"]: {"desc": "B专属描述"},
+        })
+        # 注意：set_variants 写盘，不在内存的 m 上就地更新，必须重新读取
+        mf = materials.get_material(m["id"])
+        ck("material_variant(A) 命中描述", materials.material_variant(mf, accA["id"]).get("desc") == "A专属描述")
+        ck("material_variant(B) 命中描述", materials.material_variant(mf, accB["id"]).get("desc") == "B专属描述")
+
+        # 与素材默认相同的字段不应冗余保存
+        materials.set_variants(m["id"], {accA["id"]: {"desc": "全局描述"}})
+        mf = materials.get_material(m["id"])
+        ck("与默认相同的字段被剔除", "desc" not in materials.material_variant(mf, accA["id"]),
+           str(materials.material_variant(mf, accA["id"])))
+
+        # 还原并验证合并：全局覆盖 + 账号差异，账号级优先
+        materials.set_variants(m["id"], {
+            accA["id"]: {"desc": "A专属描述", "cover_path": "C:\\a.png"},
+            accB["id"]: {"desc": "B专属描述"},
+        })
+        from wechannels import publish as P
+        merged = P.merge_publish_overrides({"desc": "全局覆盖"}, {"desc": "账号覆盖"})
+        ck("合并：账号差异覆盖全局", merged.get("desc") == "账号覆盖")
+        merged2 = P.merge_publish_overrides({"desc": "全局覆盖"}, {})
+        ck("合并：无差异时沿用全局", merged2.get("desc") == "全局覆盖")
+    finally:
+        shutil.rmtree(tmp)
+        items = materials.load_materials(aid)
+        materials.save_materials([x for x in items if x.get("account_id") != aid])
+        for _a in ("pa_a", "pa_b"):
+            if accounts.get_account(_a):
+                accounts.delete_account(_a)
+
+
+# ===========================================================================
+# 17) 发布表单解析：按账号差异化字段 + 错峰
+# ===========================================================================
+def test_publish_form_parse():
+    print("[发布表单解析 · 按账号差异化/错峰]")
+    from app import app as _app
+    from wechannels.web import views_publish as VP
+    from flask import request
+
+    data = {
+        "material_id": "m1", "accounts": ["pa_a", "pa_b"],
+        "desc": "全局描述", "original": "true", "visibility": "公开",
+        "ov_desc_pa_a": "A描述", "ov_cover_path_pa_a": "C:\\a.png",
+        "ov_desc_pa_b": "B描述", "ov_original_pa_b": "true",
+        "stagger_minutes": "5",
+    }
+    with _app.test_request_context("/publish/start", method="POST", data=data):
+        p = VP.parse_publish_form(request)
+    ck("解析出素材 id", p["mids"] == ["m1"], str(p["mids"]))
+    ck("解析出两个账号", set(p["acc_ids"]) == {"pa_a", "pa_b"}, str(p["acc_ids"]))
+    ck("全局 original 解析", p["overrides"].get("original") == "true")
+    ck("按账号 A 描述差异化", p["variants"].get("pa_a", {}).get("desc") == "A描述")
+    ck("按账号 A 封面差异化", p["variants"].get("pa_a", {}).get("cover_path") == "C:\\a.png")
+    ck("按账号 B 原创差异化", p["variants"].get("pa_b", {}).get("original") == "true")
+    ck("错峰 5 分钟解析", p["stagger_minutes"] == 5, str(p["stagger_minutes"]))
+
+    # 未被勾选的账号不应进入 variants
+    data2 = dict(data)
+    data2["accounts"] = ["pa_a"]
+    with _app.test_request_context("/publish/start", method="POST", data=data2):
+        p2 = VP.parse_publish_form(request)
+    ck("未勾选账号不进 variants", "pa_b" not in p2["variants"])
+
+    # 发布页模板能渲染（含按账号区块，且不抛 Jinja 错误）
+    c = _app.test_client()
+    rv = c.get("/publish")
+    ck("GET /publish 200 且含按账号区块", rv.status_code == 200
+       and "按账号差异化" in rv.get_data(as_text=True), f"status={rv.status_code}")
+
+
+# ===========================================================================
+# 18) 真实跑 _run_job：按账号覆盖生效 + 错峰 sleep + 单原创保护
+# ===========================================================================
+def test_publish_per_account():
+    print("[_run_job · 按账号覆盖/错峰/单原创]")
+    import unittest.mock as mock
+    import time as _time
+    from wechannels import publish as P
+
+    tmp = tempfile.mkdtemp()
+    try:
+        vid = os.path.join(tmp, "v.mp4")
+        open(vid, "wb").write(b"x")
+        m = materials.add_material(
+            {"title": "pa", "video_path": vid, "desc": "全局描述", "original": True},
+            account_id="default",
+        )
+        accA = accounts.add_account({"id": "pa_a", "name": "A"})
+        accB = accounts.add_account({"id": "pa_b", "name": "B"})
+        materials.set_variants(m["id"], {
+            accA["id"]: {"desc": "A专属描述", "cover_path": "C:\\a.png"},
+            accB["id"]: {"desc": "B专属描述"},
+        })
+
+        recorded = []
+        def fake_pub(acc, mat, overrides=None):
+            recorded.append((acc["id"], dict(overrides or {})))
+            return (True, "发布成功")
+
+        sleeps = []
+        with mock.patch.object(P, "publish_one_account", side_effect=fake_pub), \
+             mock.patch.object(_time, "sleep", side_effect=lambda s: sleeps.append(s)):
+            P._run_job(m, [accA, accB], overrides={}, batch_id="",
+                       variants=materials.get_material(m["id"])["variants"],
+                       stagger_minutes=1)
+        ck("A 使用差异化描述", any(a == "pa_a" and v.get("desc") == "A专属描述" for a, v in recorded))
+        ck("B 使用差异化描述", any(a == "pa_b" and v.get("desc") == "B专属描述" for a, v in recorded))
+        ck("错峰 sleep 调用 1 次 × 60s", len(sleeps) == 1 and sleeps[0] == 60, str(sleeps))
+
+        # 单原创保护：全局 original=true，两账号都无差异化 → 第二个自动取消
+        recorded2 = []
+        def fake_pub2(acc, mat, overrides=None):
+            recorded2.append((acc["id"], dict(overrides or {})))
+            return (True, "发布成功")
+        with mock.patch.object(P, "publish_one_account", side_effect=fake_pub2):
+            P._run_job(m, [accA, accB], overrides={"original": "true"}, batch_id="",
+                       variants={}, stagger_minutes=0)
+        ck("首账号保留原创", any(a == "pa_a" and str(v.get("original", "")).lower() in ("1", "true")
+                                for a, v in recorded2))
+        ck("次账号原创被取消(单原创保护)",
+           any(a == "pa_b" and str(v.get("original", "")).lower() in ("false", "off", "0", "")
+               for a, v in recorded2), str(recorded2))
+    finally:
+        shutil.rmtree(tmp)
+        materials.delete_material(m["id"])
+        for _a in ("pa_a", "pa_b"):
+            if accounts.get_account(_a):
+                accounts.delete_account(_a)
+
+
+# ===========================================================================
+# 19) 浏览器后端探测（ego / 自定义内核）：不抛异常、不存在返回 None
+# ===========================================================================
+def test_browser_custom_backend():
+    print("[浏览器后端探测 · 安全降级]")
+    from wechannels import browser as B
+    cfg_backup = config.BROWSER_BACKEND
+    path_backup = config.CUSTOM_BROWSER_PATH
+    try:
+        config.BROWSER_BACKEND = "auto"
+        config.CUSTOM_BROWSER_PATH = ""
+        r = B.detect_custom_browser()
+        ck("detect_custom_browser 不抛异常", True)
+
+        # 不存在的自定义路径：绝不能误用该路径本身，必须安全降级（系统内核或 None）
+        config.CUSTOM_BROWSER_PATH = "C:\\no\\such\\browser.exe"
+        nb = B.detect_custom_browser()
+        ck("不存在的自定义路径不被采用", nb != "C:\\no\\such\\browser.exe", f"got={nb}")
+
+        # 真实存在的文件：必须被直接采用（不做任何探测覆盖）
+        sentinel = os.path.join(_TMP, "fake_edge.exe")
+        open(sentinel, "wb").write(b"x")
+        config.CUSTOM_BROWSER_PATH = sentinel
+        got = B.detect_custom_browser()
+        ck("真实存在的自定义路径被采用", got == sentinel, f"got={got}")
+    finally:
+        config.BROWSER_BACKEND = cfg_backup
+        config.CUSTOM_BROWSER_PATH = path_backup
+
+
 if __name__ == "__main__":
     test_config_atomic_retry()
     test_accounts_crud()
@@ -668,6 +850,10 @@ if __name__ == "__main__":
     test_publish_checkboxes()
     test_views_smoke()
     test_media_service()
+    test_materials_variants()
+    test_publish_form_parse()
+    test_publish_per_account()
+    test_browser_custom_backend()
 
     print(f"\n==== 自我审计结果：PASS={PASS}  FAIL={FAIL} ====")
     shutil.rmtree(_TMP, ignore_errors=True)

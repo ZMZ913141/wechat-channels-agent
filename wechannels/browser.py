@@ -6,6 +6,31 @@ from browser_use import Browser
 from . import accounts, config
 
 
+def detect_custom_browser() -> str | None:
+    """探测一个「Playwright 兼容」的浏览器可执行文件路径。
+
+    返回绝对路径或 None。用途：BROWSER_BACKEND=custom 时作为启动内核。
+
+    ⚠️ ego-lite 是 Electron 应用（不是 Playwright 内核），其主程序不能被 Playwright
+    直接驱动，所以这里不会返回 ego 的主程序；此项只接受真正兼容 Playwright 的
+    内核（例如用户自己装的 Chromium / Chrome for Testing）。
+    若 CUSTOM_BROWSER_PATH 指向一个存在的文件就直接用；否则在常见安装位置里找。
+    """
+    cand = (config.CUSTOM_BROWSER_PATH or "").strip()
+    if cand and os.path.isfile(cand):
+        return cand
+    # 常见安装位置（按需补充）。ego-lite 主程序不在此列，因为无法被 Playwright 驱动。
+    roots = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Chromium\Application\chrome.exe",
+    ]
+    for p in roots:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def get_browser(account: dict | None = None, headless: bool | None = None) -> Browser:
     """创建一个带登录态持久化的浏览器实例。
 
@@ -26,11 +51,18 @@ def get_browser(account: dict | None = None, headless: bool | None = None) -> Br
         # 默认关掉扩展下载：联网下载扩展在受限网络/代理下会卡死导致浏览器启动超时
         "enable_default_extensions": not config.BROWSER_DISABLE_EXTENSIONS,
     }
-    # 复用本机已装浏览器，指纹更一致（默认仍用自带 Chromium，保证开箱即用）
-    # 支持「账号级内核」：账号指定了 channel 就用它的，否则沿用全局 BROWSER_CHANNEL。
-    _ch = accounts.channel_of(acc) or (config.BROWSER_CHANNEL or "").strip().lower()
-    if _ch and _ch != "chromium":
-        kwargs["channel"] = _ch
+    # 自定义内核：BROWSER_BACKEND=custom 且探测到一个 Playwright 兼容内核时，
+    # 用 executable_path 指定它（此时不走 channel，避免冲突）。
+    backend = (config.BROWSER_BACKEND or "auto").strip().lower()
+    custom = detect_custom_browser() if backend in ("custom", "ego") else None
+    if custom:
+        kwargs["executable_path"] = custom
+    else:
+        # 复用本机已装浏览器，指纹更一致（默认仍用自带 Chromium，保证开箱即用）
+        # 支持「账号级内核」：账号指定了 channel 就用它的，否则沿用全局 BROWSER_CHANNEL。
+        _ch = accounts.channel_of(acc) or (config.BROWSER_CHANNEL or "").strip().lower()
+        if _ch and _ch != "chromium":
+            kwargs["channel"] = _ch
     # 拟人操作延时，降低风控
     if config.WAIT_BETWEEN_ACTIONS and config.WAIT_BETWEEN_ACTIONS > 0:
         kwargs["wait_between_actions"] = config.WAIT_BETWEEN_ACTIONS

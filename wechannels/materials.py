@@ -167,6 +167,74 @@ _FIELDS = (
 LABEL_MAX_LEN = 12
 LABEL_MAX_COUNT = 12
 
+# 按账号差异化发布：每个「目标账号」可覆盖的发布字段（与发布页表单字段一一对应）
+VARIANT_FIELDS = (
+    "title", "short_title", "desc", "tags", "cover_path", "ai_declare",
+    "original", "visibility", "allow_download", "allow_comment",
+    "scheduled_at", "ext_link", "location", "collection",
+)
+# 这些字段在素材里是布尔型；做差异化比较/持久化时要按布尔判定，避免 "true"==True 误判
+_BOOL_FIELDS = ("original", "allow_download", "allow_comment")
+
+
+def _as_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    return str(v).lower() in ("1", "true", "on", "yes")
+
+
+def material_variant(mat: dict, account_id: str) -> dict:
+    """返回某账号的「按账号差异」配置；未配置则返回空 dict。
+
+    差异化配置是 key=account_id 的覆盖项集合，发布时叠加在素材默认配置之上。
+    """
+    return ((mat or {}).get("variants") or {}).get(account_id) or {}
+
+
+def set_variants(mid: str, variants: dict) -> bool:
+    """保存「按账号差异化」配置，返回是否成功。
+
+    variants: { account_id: {field: value, ...} }
+    只保留「非空 且 与素材默认值不同」的字段，避免把一堆冗余的「继承值」写进去
+    （否则每个账号都会存一份和素材一模一样的 desc，既臃肿又看不出差异）。
+    整个 variants 为空 → 直接清空该素材的 variants。
+    """
+    it = get_material(mid)
+    if not it:
+        return False
+    cleaned: dict = {}
+    for aid, ov in (variants or {}).items():
+        if not aid or not isinstance(ov, dict):
+            continue
+        sub: dict = {}
+        for f in VARIANT_FIELDS:
+            v = ov.get(f, None)
+            if isinstance(v, str):
+                v = v.strip()
+            if v in (None, ""):
+                continue
+            dflt = it.get(f, "")
+            if f in _BOOL_FIELDS:
+                # 布尔字段按语义比较，避免字符串/布尔类型不一致导致误存
+                if _as_bool(v) == _as_bool(dflt):
+                    continue
+            else:
+                if isinstance(dflt, str):
+                    dflt = dflt.strip()
+                if v == dflt:
+                    continue
+            sub[f] = v
+        if sub:
+            cleaned[aid] = sub
+    items = load_materials()
+    for x in items:
+        if x["id"] == mid:
+            x["variants"] = cleaned
+            x["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            save_materials(items)
+            return True
+    return False
+
 
 def _path() -> str:
     os.makedirs(config.STATE_DIR, exist_ok=True)
@@ -233,6 +301,8 @@ def add_material(data: dict, account_id: str | None = None) -> dict:
         "scheduled_at": data.get("scheduled_at", ""),
         "ext_link": data.get("ext_link", ""),
         "location": data.get("location", ""),
+        # 按账号差异化发布：{ account_id: {field: value, ...} }
+        "variants": data.get("variants", {}) or {},
         # 发布历史：[{time, account_id, account_name, ok, result}]
         "publish_history": [],
         "created_at": now,

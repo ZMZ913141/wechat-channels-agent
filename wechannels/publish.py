@@ -162,11 +162,33 @@ def _write_job(job: dict) -> None:
         json.dump(job, f, ensure_ascii=False, indent=2)
 
 
-def start_publish_job(material_id: str, account_ids: list, overrides: dict | None = None) -> dict:
+def merge_publish_overrides(global_ov: dict | None, variant: dict | None) -> dict:
+    """合并「表单全局覆盖」与「按账号差异」，得到某账号生效的覆盖项。
+
+    规则：先写入全局覆盖里的非空项；再用账号差异里的非空项覆盖
+    （账号级更具体，优先生效）。空字符串视为「不覆盖」，沿用素材自身配置。
+    这样全局改一处（如统一 AI 声明）+ 个别账号再微调（如换封面）可以并存。
+    """
+    out: dict = {}
+    for src in (global_ov or {}, variant or {}):
+        for k, v in src.items():
+            if isinstance(v, str):
+                v = v.strip()
+            if v in (None, ""):
+                continue
+            out[k] = v
+    return out
+
+
+def start_publish_job(material_id: str, account_ids: list, overrides: dict | None = None,
+                      variants: dict | None = None, stagger_minutes: int = 0) -> dict:
     """启动一个发布任务（后台线程串行执行）。返回任务初始状态。
 
-    overrides：发布页表单覆盖项（短标题/描述/标签/AI声明/原创/可见范围/定时/扩展链接），
+    overrides：发布页全局表单覆盖项（短标题/描述/标签/AI声明/原创/可见范围/定时/扩展链接），
     留空的字段回退到素材自身配置。
+    variants：按账号差异化覆盖项 { account_id: {field: value} }（叠加在 overrides 之上）。
+    stagger_minutes：错峰间隔（分钟）—— 多号矩阵防限流：除第一个账号外，
+    每发布完一个账号等待 N 分钟再发下一个；0=不等待连续发布。
     """
     mat = materials.get_material(material_id)
     if not mat:
@@ -183,6 +205,14 @@ def start_publish_job(material_id: str, account_ids: list, overrides: dict | Non
         raise ValueError("所选账号均无效")
 
     ov = overrides or {}
+    variants = variants or {}
+    try:
+        stagger_minutes = int(stagger_minutes or 0)
+    except (TypeError, ValueError):
+        stagger_minutes = 0
+    if stagger_minutes < 0:
+        stagger_minutes = 0
+
     ai = (ov.get("ai_declare") if ov.get("ai_declare") is not None else mat.get("ai_declare")) or ""
     job = {
         "material_id": material_id,
@@ -194,6 +224,8 @@ def start_publish_job(material_id: str, account_ids: list, overrides: dict | Non
             "visibility": ov.get("visibility") or mat.get("visibility") or "公开",
             "scheduled_at": ov.get("scheduled_at") or mat.get("scheduled_at") or "",
             "cover_path": ov.get("cover_path") or mat.get("cover_path") or "",
+            "stagger_minutes": stagger_minutes,
+            "per_account": bool(variants),
         },
         "accounts": [{"id": a["id"], "name": a["name"], "status": "排队中", "result": ""} for a in accs],
         "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -210,7 +242,11 @@ def start_publish_job(material_id: str, account_ids: list, overrides: dict | Non
     with _job_lock:
         _write_job(job)
 
-    t = threading.Thread(target=_run_job, args=(mat, accs, ov, batch["batch_id"]), daemon=True)
+    t = threading.Thread(
+        target=_run_job,
+        args=(mat, accs, ov, batch["batch_id"], variants, stagger_minutes),
+        daemon=True,
+    )
     t.start()
     return job
 
@@ -221,17 +257,42 @@ def read_job() -> dict | None:
 
 
 def _run_job(mat: dict, accs: list, overrides: dict | None = None,
-             batch_id: str = "") -> None:
+             batch_id: str = "", variants: dict | None = None,
+             stagger_minutes: int = 0) -> None:
     results = []
-    _log.info("发布任务开始：素材=%s 账号数=%d batch=%s", mat.get("id"), len(accs), batch_id)
-    for acc in accs:
+    variant_notes = []          # 单原创保护等产生的提示，汇总时一并告知
+    original_claimed = False    # 单原创保护：同视频最多一个账号声明原创
+    _log.info("发布任务开始：素材=%s 账号数=%d batch=%s 错峰=%d分",
+              mat.get("id"), len(accs), batch_id, stagger_minutes)
+    for idx, acc in enumerate(accs):
+        # ---- 错峰：除第一个账号外，发布前等待 stagger_minutes ----
+        if idx > 0 and stagger_minutes > 0:
+            left = stagger_minutes
+            _update_account_status(acc["id"], f"⏳ 错峰等待中（约 {left} 分钟）", "")
+            _log.info("错峰等待 %d 分钟后再发账号 %s", left, acc.get("name"))
+            time.sleep(stagger_minutes * 60)
+
         _update_account_status(acc["id"], "发布中…", "")
+        # ---- 按账号差异：叠加全局覆盖 + 本账号专属覆盖 ----
+        variant = (variants or {}).get(acc["id"], {})
+        eff = merge_publish_overrides(overrides, variant)
+        # ---- 单原创保护：同一视频最多一个账号声明原创，其余自动取消 ----
+        orig_truthy = str(eff.get("original", "")).lower() in ("1", "true", "on", "yes")
+        if orig_truthy and original_claimed:
+            eff["original"] = "false"
+            variant_notes.append(
+                f"账号「{acc.get('name') or acc['id']}」的原创声明已被其他账号占用，"
+                "已自动取消（同视频最多一个账号可声明原创）")
+            _log.warning("单原创保护：取消账号 %s 的原创声明", acc.get("name"))
+        elif orig_truthy:
+            original_claimed = True
+
         # ---- 写入 ledger（数据看板的数据源）----
         if batch_id:
             ledger.start_target(batch_id, acc["id"], acc.get("name", ""))
         t0 = time.time()
         try:
-            ok, text = publish_one_account(acc, mat, overrides=overrides)
+            ok, text = publish_one_account(acc, mat, overrides=eff)
             status = "✅ 成功" if ok else "❌ 失败"
             results.append((acc, ok, text))
             _update_account_status(acc["id"], status, text)
@@ -275,10 +336,16 @@ def _run_job(mat: dict, accs: list, overrides: dict | None = None,
         extra.append(f"定时：{cfg['scheduled_at']}")
     if cfg.get("visibility") and cfg["visibility"] != "公开":
         extra.append(f"可见：{cfg['visibility']}")
+    if cfg.get("stagger_minutes"):
+        extra.append(f"错峰：每号间隔{cfg['stagger_minutes']}分钟")
+    if cfg.get("per_account"):
+        extra.append("按账号差异化")
     extra_s = ("（" + "，".join(extra) + "）") if extra else ""
     lines = [f"素材「{mat.get('title','')}」同步发布完成：{ok_count}/{len(results)} 个账号成功{extra_s}"]
     for acc, ok, text in results:
         lines.append(f"- {acc['name']}: {'成功' if ok else '失败（' + text[:80] + '）'}")
+    if variant_notes:
+        lines.append("⚠️ " + "；".join(variant_notes))
     summary = "\n".join(lines)
     # 结果同时用于面板「发布中心」展示与落盘存档
     print(f"[INFO] 同步发布汇总：\n{summary}")

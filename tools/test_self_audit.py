@@ -12,6 +12,7 @@ import sys
 import json
 import shutil
 import tempfile
+import time
 
 # ⚠️ 必须在 import wechannels 之前设置 STATE_DIR / USER_DATA_DIR，
 # 否则 config 在 import 时就固化了真实 state 路径，测试会污染用户数据。
@@ -831,6 +832,98 @@ def test_browser_custom_backend():
         config.CUSTOM_BROWSER_PATH = path_backup
 
 
+# ===========================================================================
+# 20) 账号↔浏览器绑定：切换守卫 + 清空档案 + 内核重复检测
+# ===========================================================================
+def test_account_kernel_guard():
+    print("[账号↔浏览器绑定 · 切换守卫/清空档案]")
+    tmp = tempfile.mkdtemp()
+    try:
+        prof = os.path.join(tmp, "prof_kg")
+        os.makedirs(prof, exist_ok=True)
+        a0 = accounts.add_account({"id": "kg0", "name": "空号", "profile_dir": prof})
+        ck("空档案 has_profile_data=False", accounts.has_profile_data(a0) is False)
+        ck("空档案切内核不需清空", accounts.channel_switch_needs_clear(a0, "msedge") is False)
+
+        # 写入登录数据 → 视为已登录
+        with open(os.path.join(prof, "Local State"), "wb") as f:
+            f.write(b"{}")
+        ck("有数据 has_profile_data=True", accounts.has_profile_data(a0) is True)
+        ck("已登录切到不同内核需清空", accounts.channel_switch_needs_clear(a0, "msedge") is True)
+        ck("切到相同偏好不需清空",
+           accounts.channel_switch_needs_clear(a0, accounts.channel_of(a0)) is False)
+
+        # 记录实测内核=msedge → 切到 msedge 不需清空（它就是当初用的内核）
+        kp = accounts._kernels_path()
+        os.makedirs(os.path.dirname(kp), exist_ok=True)
+        with open(kp, "w", encoding="utf-8") as f:
+            json.dump({os.path.abspath(prof).lower(): "msedge"}, f, ensure_ascii=False)
+        ck("目标=档案实测内核 → 不需清空",
+           accounts.channel_switch_needs_clear(a0, "msedge") is False)
+
+        # 清空档案：备份 + 目录清空 + 忘记内核 + 清身份
+        from wechannels import loginprobe as _lp
+        _lp.write_identity("kg0", {"nickname": "x", "logged_in": True, "ts": time.time()})
+        r = accounts.clear_profile(a0)
+        ck("清空档案成功", r.get("ok") is True, str(r))
+        ck("已生成备份目录", bool(r.get("backup")) and os.path.isdir(r.get("backup")), str(r.get("backup")))
+        ck("清空后档案无数据", accounts.has_profile_data(a0) is False)
+        ck("清空后忘记实测内核", accounts.profile_kernel(a0) is None)
+        ck("清空后登录身份被移除", _lp.read_identity("kg0") == {})
+
+        # 内核重复检测（同内核多号 → dups）
+        accounts.add_account({"id": "kg1", "name": "号1",
+                              "profile_dir": os.path.join(tmp, "p1"), "channel": "msedge"})
+        accounts.add_account({"id": "kg2", "name": "号2",
+                              "profile_dir": os.path.join(tmp, "p2"), "channel": "msedge"})
+        st = accounts.kernel_distinct_status()
+        ck("检测到内核重复", any(d["kernel"] == "msedge" for d in st["dups"]), str(st))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        for _a in ("kg0", "kg1", "kg2"):
+            if accounts.get_account(_a):
+                accounts.delete_account(_a)
+
+
+# ===========================================================================
+# 21) 发布模式：统一（忽略差异化/错峰）vs 错峰（保留）
+# ===========================================================================
+def test_publish_mode():
+    print("[发布模式 · 统一/错峰 解析]")
+    from app import app as _app
+    from wechannels.web import views_publish as VP
+    from flask import request
+
+    base = {"material_id": "m1", "accounts": ["pa_a", "pa_b"],
+            "desc": "全局", "ov_desc_pa_a": "A", "ov_tags_pa_b": "x,y",
+            "stagger_minutes": "7"}
+
+    d1 = dict(base); d1["publish_mode"] = "unified"
+    with _app.test_request_context("/publish/start", method="POST", data=d1):
+        p1 = VP.parse_publish_form(request)
+    ck("unified → variants 为空", p1["variants"] == {}, str(p1["variants"]))
+    ck("unified → 错峰归零", p1["stagger_minutes"] == 0, str(p1["stagger_minutes"]))
+    ck("unified → mode=unified", p1["mode"] == "unified")
+
+    d2 = dict(base); d2["publish_mode"] = "stagger"
+    with _app.test_request_context("/publish/start", method="POST", data=d2):
+        p2 = VP.parse_publish_form(request)
+    ck("stagger → 保留差异化", p2["variants"].get("pa_a", {}).get("desc") == "A")
+    ck("stagger → 保留错峰", p2["stagger_minutes"] == 7)
+    ck("stagger → mode=stagger", p2["mode"] == "stagger")
+
+    # 缺省（旧调用/测试）→ 按错峰，保持向后兼容
+    with _app.test_request_context("/publish/start", method="POST", data=base):
+        p3 = VP.parse_publish_form(request)
+    ck("缺省 mode → stagger（向后兼容）", p3["mode"] == "stagger" and bool(p3["variants"]))
+
+    # 页面含模式切换与错峰区块
+    c = _app.test_client()
+    h = c.get("/publish").get_data(as_text=True)
+    ck("发布页含模式切换", 'name="publish_mode"' in h and 'id="staggerZone"' in h)
+    ck("发布页含每号 AI 填空", "genFieldFor(" in h)
+
+
 if __name__ == "__main__":
     test_config_atomic_retry()
     test_accounts_crud()
@@ -854,6 +947,8 @@ if __name__ == "__main__":
     test_publish_form_parse()
     test_publish_per_account()
     test_browser_custom_backend()
+    test_account_kernel_guard()
+    test_publish_mode()
 
     print(f"\n==== 自我审计结果：PASS={PASS}  FAIL={FAIL} ====")
     shutil.rmtree(_TMP, ignore_errors=True)

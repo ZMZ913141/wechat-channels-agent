@@ -179,6 +179,26 @@ def accounts_channel(a: dict) -> str:
     return _acc.channel_of(a)
 
 
+def accounts_has_data(a: dict) -> bool:
+    """该账号的浏览器档案里是否已有登录态/缓存（决定换内核是否需要清空）。"""
+    from .. import accounts as _acc
+
+    try:
+        return _acc.has_profile_data(a)
+    except Exception:
+        return False
+
+
+def accounts_kernel(a: dict) -> str:
+    """档案实测可用内核（None → 尚未记录）；模板里用来显示「已绑定」信息。"""
+    from .. import accounts as _acc
+
+    try:
+        return _acc.profile_kernel(a) or ""
+    except Exception:
+        return ""
+
+
 def thumb_lazy(m: dict) -> str:
     """卡片缩略图的**懒加载**版本。
 
@@ -287,6 +307,8 @@ app.jinja_env.globals.update(
     library_summary=library_summary,
     filter_qs=filter_qs,
     accounts_channel=accounts_channel,
+    accounts_has_data=accounts_has_data,
+    accounts_kernel=accounts_kernel,
     login_badge=login_badge,
     pause_badge=pause_badge,
     media_url=media_url,

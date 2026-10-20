@@ -77,7 +77,7 @@
           {% for v in ai_opts %}<option value="{{ v }}"{{ ' selected' if (mat and mat.ai_declare == v) else '' }}>{{ v }}</option>{% endfor %}
         </select>
         <div class="checks">
-          <label><input type="checkbox" name="original" value="true" {{ "checked" if (not mat or mat.original) }}> 声明原创（展示原创标记，有机会获得广告收入）</label>
+          <label class="origlabel"><input type="checkbox" class="origchk" name="original" value="true" {{ "checked" if (not mat or mat.original) }} onchange="onOrigChange(this)"> 声明原创（展示原创标记，有机会获得广告收入）</label>
           <label><input type="checkbox" name="allow_download" value="true" {{ "checked" if mat and mat.allow_download }}> 允许他人下载视频</label>
           <label><input type="checkbox" name="allow_comment" value="true" {{ "checked" if (not mat or mat.allow_comment is not defined or mat.allow_comment) }}> 允许评论</label>
         </div>
@@ -89,34 +89,52 @@
         </div>
         <label>扩展链接 <span class="muted">（公众号文章需近 7 天发表且阅读量超 10000；选填）</span></label>
         <input name="ext_link" value="{{ (mat.ext_link or "") if mat else "" }}" placeholder="https://mp.weixin.qq.com/s/...">
+        <label>发布模式</label>
+        <div class="pubmode" id="pubmode">
+          <label class="pmode on"><input type="radio" name="publish_mode" value="unified" checked onchange="applyMode(this.value)"> <b>统一发布</b><span class="muted">所有账号用同一套内容</span></label>
+          <label class="pmode"><input type="radio" name="publish_mode" value="stagger" onchange="applyMode(this.value)"> <b>错峰发布</b><span class="muted">每号可差异化 + 间隔，防限流</span></label>
+        </div>
         <label>选择要发布的账号（可多选，将按顺序逐号发布）</label>
         <div class="accs">{% for a in accounts %}
 <label title="{{ a.profile_dir }}"{% if a.id in blocked_ids %} class="accblocked"{% endif %}><input type="checkbox" id="acc_chk_{{ a.id }}" name="accounts" value="{{ a.id }}"{{ ' checked' if a.id == cur_account_id and a.id not in blocked_ids }}> {{ a.name or a.id }}（{{ a.id }}）{% if a.id in blocked_ids %}<span class="abadge warn" title="该账号当前被占用或暂停，勾选后发布仍会失败">⚠ 暂不可用</span>{% endif %}{{ login_badge(a.id)|safe }}</label>
 {% endfor %}</div>
-        <label>错峰间隔（分钟）<span class="muted">（多号矩阵防限流：除第一个账号外，每发完一个账号等待 N 分钟再发下一个；0 = 立即连续发布）</span></label>
-        <input type="number" name="stagger_minutes" id="p_stag" min="0" max="600" step="1" value="0">
-        <div class="peracc" id="peracc">
-          <div class="law">🎛️ <b>按账号差异化发布（可选）</b>：给下面每个勾选的账号设置不同的标题/描述/封面/可见范围等，配合错峰间隔，最大化降低「同视频多号」被平台限流的风险。留空 = 沿用上方全局/素材默认。</div>
-          {% for a, av in accvars %}
-          <div class="accvar" id="accvar_{{ a.id }}" style="display:none" data-acc="{{ a.id }}">
-            <div class="avhead">{{ a.name or a.id }}（{{ a.id }}）<span class="muted">专属配置（留空 = 沿用默认）</span></div>
-            <label>标题/描述 <span class="muted">（该账号用的主文案）</span></label>
-            <textarea name="ov_desc_{{ a.id }}" id="ov_desc_{{ a.id }}">{{ av.get('desc','') or '' }}</textarea>
-            <label>短标题</label>
-            <input name="ov_short_title_{{ a.id }}" value="{{ av.get('short_title','') or '' }}">
-            <label>话题标签</label>
-            <input name="ov_tags_{{ a.id }}" value="{{ av.get('tags','') or '' }}">
-            <label>封面路径 <span class="muted">（本地绝对路径；留空则用素材封面）</span></label>
-            <input name="ov_cover_path_{{ a.id }}" value="{{ av.get('cover_path','') or '' }}">
-            <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-              <div><label>可见范围</label>
-                <select name="ov_visibility_{{ a.id }}">{% for v in vis_opts %}<option{{ ' selected' if (av.get('visibility','') or '公开') == v }}>{{ v }}</option>{% endfor %}</select></div>
-              <div><label>AI 声明</label>
-                <select name="ov_ai_declare_{{ a.id }}"><option value="">（不声明 / 非AI内容）</option>{% for v in ai_opts %}<option{{ ' selected' if av.get('ai_declare','') == v }}>{{ v }}</option>{% endfor %}</select></div>
+        <div id="staggerZone" style="display:none">
+          <label>错峰间隔（分钟）<span class="muted">（多号矩阵防限流：除第一个账号外，每发完一个账号等待 N 分钟再发下一个；0 = 立即连续发布）</span></label>
+          <input type="number" name="stagger_minutes" id="p_stag" min="0" max="600" step="1" value="0">
+          <div class="peracc" id="peracc">
+            <div class="law">🎛️ <b>按账号差异化发布</b>：给下面每个勾选的账号设置不同的标题/描述/封面/合集/可见范围等，配合错峰间隔，最大化降低「同视频多号」被平台限流的风险。留空 = 沿用上方全局/素材默认。</div>
+            {% for a, av in accvars %}
+            <div class="accvar" id="accvar_{{ a.id }}" style="display:none" data-acc="{{ a.id }}">
+              <div class="avhead">{{ a.name or a.id }}（{{ a.id }}）<span class="muted">专属配置（留空 = 沿用默认）</span>
+                <button type="button" class="genbtn" style="float:right" onclick="genFieldFor('{{ a.id }}','desc')">✨ 本号 AI 填空</button>
+              </div>
+              <label>标题/描述 <span class="muted">（该账号用的主文案）</span>
+                <button type="button" class="genbtn" onclick="genFieldFor('{{ a.id }}','desc')">✨ AI填写</button></label>
+              <textarea name="ov_desc_{{ a.id }}" id="ov_desc_{{ a.id }}" class="ovfield">{{ av.get('desc','') or '' }}</textarea>
+              <label>短标题
+                <button type="button" class="genbtn" onclick="genFieldFor('{{ a.id }}','short_title')">✨ AI填写</button></label>
+              <input name="ov_short_title_{{ a.id }}" id="ov_short_title_{{ a.id }}" class="ovfield" value="{{ av.get('short_title','') or '' }}">
+              <label>话题标签
+                <button type="button" class="genbtn" onclick="genFieldFor('{{ a.id }}','tags')">✨ AI填写</button></label>
+              <input name="ov_tags_{{ a.id }}" id="ov_tags_{{ a.id }}" class="ovfield" value="{{ av.get('tags','') or '' }}">
+              <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                <div><label>专属合集 <span class="muted">（该号单独归入的合集；留空=用上方全局）</span></label>
+                  <select name="ov_collection_{{ a.id }}" id="ov_collection_{{ a.id }}" class="ovfield">
+                    <option value="">（沿用上方全局）</option>
+                    {% set _cur = av.get('collection','') or '' %}
+                    {% for c in collections %}<option value="{{ c.name }}"{{ ' selected' if _cur == c.name }}>{{ c.name }}</option>{% endfor %}
+                  </select></div>
+                <div><label>可见范围</label>
+                  <select name="ov_visibility_{{ a.id }}" id="ov_visibility_{{ a.id }}" class="ovfield">{% for v in vis_opts %}<option{{ ' selected' if (av.get('visibility','') or '公开') == v }}>{{ v }}</option>{% endfor %}</select></div>
+              </div>
+              <label>封面路径 <span class="muted">（本地绝对路径；留空则用素材封面）</span></label>
+              <input name="ov_cover_path_{{ a.id }}" id="ov_cover_path_{{ a.id }}" class="ovfield" value="{{ av.get('cover_path','') or '' }}">
+              <label>AI 声明</label>
+              <select name="ov_ai_declare_{{ a.id }}" id="ov_ai_declare_{{ a.id }}" class="ovfield"><option value="">（不声明 / 非AI内容）</option>{% for v in ai_opts %}<option{{ ' selected' if av.get('ai_declare','') == v }}>{{ v }}</option>{% endfor %}</select>
+              <label class="origlabel" style="display:inline-flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" class="origchk" data-acc="{{ a.id }}" name="ov_original_{{ a.id }}" value="true"{{ ' checked' if av.get('original') in ('1','true','on','yes',true) }} onchange="onOrigChange(this)"> 声明原创<span class="muted">（同一视频仅 1 个账号可声明，勾一个其余自动置灰）</span></label>
             </div>
-            <label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" name="ov_original_{{ a.id }}" value="true"{{ ' checked' if av.get('original') in ('1','true','on','yes',true) }}> 声明原创（同视频最多一个账号勾选，其余自动取消）</label>
+            {% endfor %}
           </div>
-          {% endfor %}
         </div>
         <p class="muted">发布由确定性Playwright 直填表单完成（零token），以上配置会逐号自动动填写；默认有头浏览器可肉眼确认；发布期间对应账号的私信监控会暂停（文件锁互斥）。</p>
         <button class="btn" type="submit">开始同步发布</button>
@@ -246,20 +264,104 @@ function startJobWatch(){
   });
 })();
 
-/* ---- 按账号差异化：勾选账号 → 显示该账号的专属配置卡片 ---- */
+/* ---- 发布模式：统一 / 错峰 ----
+   统一：隐藏并禁用「错峰 + 每账号差异化」整块（disabled 的字段不会提交；
+        后端 publish_mode=unified 也会强制忽略，双保险）。
+   错峰：显示该区块，再按勾选状态显示各自卡片。 */
+var MODE = 'unified';
 var ACCIDS = {{ accids|tojson }};
+function setZoneEnabled(zone, on){
+  if(!zone) return;
+  Array.prototype.forEach.call(zone.querySelectorAll('input,select,textarea'),
+    function(el){ el.disabled = !on; });
+}
 function toggleAccvars(){
   ACCIDS.forEach(function(id){
     var cb = document.getElementById('acc_chk_'+id);
     var card = document.getElementById('accvar_'+id);
-    if(cb && card){ card.style.display = cb.checked ? 'block' : 'none'; }
+    if(!cb || !card) return;
+    var on = cb.checked && MODE === 'stagger';
+    card.style.display = on ? 'block' : 'none';
+    Array.prototype.forEach.call(card.querySelectorAll('input,select,textarea'),
+      function(el){ el.disabled = !on; });
   });
+  if(MODE === 'stagger') initOriginals();
 }
-toggleAccvars();   // 初始按默认勾选态排布
+function applyMode(m){
+  MODE = (m === 'stagger') ? 'stagger' : 'unified';
+  var zone = document.getElementById('staggerZone');
+  var isStagger = (MODE === 'stagger');
+  if(zone) zone.style.display = isStagger ? 'block' : 'none';
+  setZoneEnabled(zone, isStagger);       // 统一模式整块禁用
+  Array.prototype.forEach.call(document.querySelectorAll('.pmode'), function(l){
+    var r = l.querySelector('input'); l.classList.toggle('on', !!(r && r.checked));
+  });
+  if(!isStagger){
+    var g = document.querySelector('input.origchk:not([data-acc])');
+    if(g) g.disabled = false;
+    Array.prototype.forEach.call(document.querySelectorAll('input.origchk[data-acc]'),
+      function(c){ c.disabled = true; });
+  }
+  toggleAccvars();
+}
+
+/* ---- 单原创互斥：同一视频仅 1 个账号可声明原创 ----
+   勾一个 → 其余原创勾选框置灰且不可勾（全局与账号级一起，避免误提交被平台判违规）。 */
+function _origAll(){ return Array.prototype.slice.call(document.querySelectorAll('input.origchk')); }
+function _origGlobal(){ return document.querySelector('input.origchk:not([data-acc])'); }
+function onOrigChange(src){
+  var isGlobal = (src === _origGlobal());
+  if(src.checked){
+    _origAll().forEach(function(c){
+      if(c === src) return;
+      if(isGlobal && c.disabled) return;   // 全局勾选：只灰掉「当前可操作」的账号原创
+      c.checked = false; c.disabled = true; c.dataset.greyed = '1';
+    });
+  } else {
+    _origAll().forEach(function(c){
+      if(c.dataset.greyed === '1'){ c.disabled = false; delete c.dataset.greyed; }
+    });
+  }
+}
+function initOriginals(){
+  if(MODE !== 'stagger') return;
+  var accChecked = Array.prototype.slice.call(document.querySelectorAll('#peracc input.origchk'))
+                    .filter(function(c){ return c.checked && !c.disabled; });
+  var g = _origGlobal();
+  if(accChecked.length){
+    onOrigChange(accChecked[0]);          // 账号级优先
+  } else if(g && g.checked){
+    onOrigChange(g);
+  }
+}
+
+/* ---- 每账号 AI 填空（写入该账号的 ov_* 字段，不影响全局） ---- */
+function genFieldFor(aid, field){
+  var map = {short_title:'ov_short_title_', desc:'ov_desc_', tags:'ov_tags_'};
+  var prefix = map[field];
+  if(!prefix) return;
+  var el = document.getElementById(prefix + aid);
+  if(!el) return;
+  var base = AF_FALLBACK_NAME || '';
+  if(!base){ afNote('请先选择素材，AI 需要素材标题作为依据'); return; }
+  fetch('/materials/autofill?field=' + encodeURIComponent(field) +
+        '&base=' + encodeURIComponent(base))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.value){ el.value = d.value; }
+      else afNote('AI 未返回内容，可手写');
+    })
+    .catch(function(){ afNote('AI 调用失败，可手写'); });
+}
+
+/* 账号勾选变化 → 重排卡片 */
 ACCIDS.forEach(function(id){
-  var cb = document.getElementById('acc_chk_'+id);
+  var cb = document.getElementById('acc_chk_' + id);
   if(cb) cb.addEventListener('change', toggleAccvars);
 });
+
+/* 初始：统一模式（面板干净）；切到「错峰」才展开下部分 */
+applyMode('unified');
 </script>
 {% endblock %}
 {% endblock %}

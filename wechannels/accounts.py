@@ -15,6 +15,7 @@
 """
 import json
 import os
+import time
 
 from . import config
 
@@ -230,3 +231,164 @@ def delete_account(aid: str) -> bool:
     if current_account_id() == aid:
         set_current_account(new[0]["id"])
     return True
+
+
+# ===========================================================================
+# 内核绑定 / 档案清空（「不同账号用不同浏览器、不能随意切换」的落地点）
+#
+# 为什么要这一层：
+#   一个浏览器档案（user_data_dir）是**由某个内核创建的**，换另一个内核去打开
+#   会因格式版本不兼容直接退出（实测 exitCode=21 / "Settings version is not 1"）。
+#   所以「切换浏览器内核」= 旧档案作废、必须重新扫码登录。
+#   launcher 会把「档案首次成功启动时的内核」记进 working_kernels.json，并在
+#   启动时优先用它——这天然把账号「钉」在它当初登录的那个浏览器上。
+#   这里把同一份记忆暴露给面板，做成「切换必须清空档案」的强制约束。
+# ===========================================================================
+_WORKING_KERNEL_FILE = "working_kernels.json"   # 与 launcher 共用同一文件
+
+
+def _kernels_path() -> str:
+    return os.path.join(config.STATE_DIR, _WORKING_KERNEL_FILE)
+
+
+def load_working_kernels() -> dict:
+    try:
+        with open(_kernels_path(), encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def profile_kernel(account: dict) -> str | None:
+    """该档案「实测可用内核」（'' 表示 Playwright 内置 Chromium）。
+
+    None 表示还没记录（从未成功启动过）。注意 '' 是合法值，不能用真值判断。
+    """
+    prof = _resolve((account or {}).get("profile_dir", ""))
+    d = load_working_kernels()
+    return d.get(os.path.abspath(prof).lower()) if os.path.abspath(prof).lower() in d else None
+
+
+def _forget_working_kernel(profile: str) -> None:
+    """档案被清空后，忘掉它之前记录的实测内核（否则下次仍按旧内核启动）。"""
+    try:
+        prof = os.path.abspath(profile).lower()
+        d = load_working_kernels()
+        if prof not in d:
+            return
+        del d[prof]
+        os.makedirs(config.STATE_DIR, exist_ok=True)
+        config.save_json_atomic(_kernels_path(), d, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def has_profile_data(account: dict) -> bool:
+    """该账号的浏览器档案里是否已有「登录态/浏览数据」。
+
+    判据（任一命中即视为有数据）：
+      - Local State / Default/Cookies / Default/History / Cookies 存在；
+      - 目录里除 Chromium 的 Singleton* 锁之外还有别的文件。
+    空档案（刚建、从未登录）返回 False —— 这种情况切内核不需要清空。
+    """
+    p = _resolve((account or {}).get("profile_dir", ""))
+    if not os.path.isdir(p):
+        return False
+    for rel in ("Local State", "Default/Cookies", "Default/History", "Cookies"):
+        if os.path.exists(os.path.join(p, rel)):
+            return True
+    try:
+        for n in os.listdir(p):
+            if not n.startswith("Singleton"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def channel_switch_needs_clear(account: dict, new_channel: str) -> bool:
+    """把账号内核切到 new_channel 时，是否**必须**先清空档案（否则打不开）。
+
+    规则：档案已有数据 且 目标偏好 != 当前偏好 且 目标偏好 != 档案实测内核
+          → 需要清空重登。
+    空档案 / 切到同一个内核 / 目标就是它当初登录用的内核 → 不需要清空。
+    """
+    new = (new_channel or "").strip().lower()
+    if new not in VALID_CHANNELS:
+        new = ""
+    if new == channel_of(account):
+        return False
+    if not has_profile_data(account):
+        return False
+    wk = profile_kernel(account)
+    if wk is not None and wk == new:
+        return False          # 目标正是它当初用的内核，兼容
+    return True
+
+
+def clear_profile(account: dict, backup: bool = True) -> dict:
+    """清空账号浏览器档案（登录态/缓存/指纹全清），返回 {ok, backup, error}。
+
+    默认先把整个档案目录**移动**到 state/profile_backups/<id>-<时间戳>/ 作为
+    备份（可手动找回），再建一个空目录。同时清掉该档案的「实测内核」记忆与
+    登录身份记录——这样下次启动才会真正按**新内核**走、并重新扫码。
+
+    ⚠️ 这是不可逆的登录态清除：清完必须重新扫码登录。
+    """
+    aid = (account or {}).get("id") or "default"
+    p = _resolve((account or {}).get("profile_dir", ""))
+    backup_path = ""
+    if os.path.isdir(p):
+        try:
+            nonempty = bool(os.listdir(p))
+        except Exception:
+            nonempty = False
+        if nonempty:
+            if backup:
+                try:
+                    root = os.path.join(config.STATE_DIR, "profile_backups")
+                    os.makedirs(root, exist_ok=True)
+                    stamp = time.strftime("%Y%m%d-%H%M%S")
+                    backup_path = os.path.join(root, f"{aid}-{stamp}")
+                    import shutil
+                    shutil.move(p, backup_path)
+                except Exception as e:
+                    return {"ok": False, "backup": "", "error": f"备份失败：{e}"}
+            else:
+                try:
+                    import shutil
+                    shutil.rmtree(p)
+                except Exception as e:
+                    return {"ok": False, "backup": "", "error": f"删除失败：{e}"}
+    try:
+        os.makedirs(p, exist_ok=True)
+    except Exception as e:
+        return {"ok": False, "backup": backup_path, "error": f"重建目录失败：{e}"}
+
+    _forget_working_kernel(p)
+    # 清掉登录身份记录（否则面板还显示旧的「已确认」昵称）
+    try:
+        os.remove(os.path.join(config.STATE_DIR, f"login_probe_{aid}.json"))
+    except Exception:
+        pass
+    return {"ok": True, "backup": backup_path, "error": ""}
+
+
+def kernel_key(account: dict) -> str:
+    """「不同账号用不同浏览器」的比对键。'' 偏好（自动）归一为 auto。"""
+    return channel_of(account) or "auto"
+
+
+def kernel_distinct_status() -> dict:
+    """检查启用账号的内核是否尽量互不相同（同内核多号 = 指纹雷同，易被关联限流）。
+
+    返回 {total, distinct, dups:[{kernel, labels}]}。
+    这不是硬性阻断（内核只有 3 种，账号超过 3 个必然重复），而是给面板做提示：
+    能分的尽量分开，分不开的至少靠独立档案 + 错峰 + 差异化内容降低关联度。
+    """
+    ena = get_enabled_accounts()
+    groups: dict = {}
+    for a in ena:
+        groups.setdefault(kernel_key(a), []).append(a.get("name") or a["id"])
+    dups = [{"kernel": k, "labels": v} for k, v in groups.items() if len(v) > 1]
+    return {"total": len(ena), "distinct": len(groups), "dups": dups}

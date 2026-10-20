@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>视频号多账号发布 · 操作规范</title>
+<style>
+  :root{
+    --bg:#f6f8fb; --card:#ffffff; --ink:#1f2733; --muted:#5b6675;
+    --line:#e2e8f0; --brand:#2563eb; --brand-soft:#eaf1ff;
+    --ok:#15803d; --ok-soft:#e7f6ec; --warn:#b45309; --warn-soft:#fdf2e2;
+    --bad:#b91c1c; --bad-soft:#fdeaea; --chip:#eef2f7; --shadow:0 1px 3px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.05);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:32px 20px 64px}
+  header.top{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-radius:18px;padding:28px 30px;box-shadow:var(--shadow)}
+  header.top h1{margin:0 0 6px;font-size:24px;letter-spacing:.5px}
+  header.top p{margin:0;opacity:.9;font-size:14px}
+  .tag{display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);padding:3px 10px;border-radius:999px;font-size:12px;margin-top:12px;margin-right:6px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px 26px;margin-top:20px;box-shadow:var(--shadow)}
+  h2{font-size:19px;margin:0 0 14px;display:flex;align-items:center;gap:10px}
+  h2 .n{width:28px;height:28px;border-radius:9px;background:var(--brand-soft);color:var(--brand);display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex:0 0 auto}
+  h3{font-size:15px;margin:18px 0 8px;color:var(--ink)}
+  p{margin:8px 0}
+  .muted{color:var(--muted)}
+  ul{margin:8px 0;padding-left:20px}
+  li{margin:5px 0}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--chip);font-weight:600}
+  tr:nth-child(even) td{background:#fafbfc}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
+  .p-ok{background:var(--ok-soft);color:var(--ok)}
+  .p-warn{background:var(--warn-soft);color:var(--warn)}
+  .p-bad{background:var(--bad-soft);color:var(--bad)}
+  .p-brand{background:var(--brand-soft);color:var(--brand)}
+  .callout{border-left:4px solid var(--brand);background:var(--brand-soft);padding:12px 16px;border-radius:10px;margin:14px 0}
+  .callout.warn{border-color:var(--warn);background:var(--warn-soft)}
+  .callout.bad{border-color:var(--bad);background:var(--bad-soft)}
+  .callout.ok{border-color:var(--ok);background:var(--ok-soft)}
+  code{background:#eef2f7;padding:1px 6px;border-radius:6px;font-size:13px}
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;margin:16px 0}
+  .flow .step{flex:1 1 150px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;position:relative}
+  .flow .step .t{font-weight:700;color:var(--brand);font-size:13px;margin-bottom:4px}
+  .flow .step .d{font-size:13px;color:var(--muted)}
+  .flow .arrow{display:flex;align-items:center;color:var(--muted);font-size:20px;flex:0 0 auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:680px){.grid2{grid-template-columns:1fr}.flow .arrow{transform:rotate(90deg)}}
+  .card{border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin:0 0 8px;font-size:14px}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin:10px 0 0;font-size:13px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:50%}
+  footer{text-align:center;color:var(--muted);font-size:12px;margin-top:28px}
+  .kbd{background:#1f2733;color:#fff;padding:1px 7px;border-radius:6px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>视频号多账号发布 · 操作规范</h1>
+    <p>账号登录失效排查 · 账号↔浏览器内核强制绑定 · 统一/错峰发布 · 单原创互斥 · ego-lite 取舍</p>
+    <div>
+      <span class="tag">适用版本：含内核绑定 + 发布模式切换</span>
+      <span class="tag">配套自测：172/0 通过</span>
+    </div>
+  </header>
+
+  <!-- 一 -->
+  <section>
+    <h2><span class="n">1</span>登录失败：到底有没有“时效性”？</h2>
+    <p class="muted">先给结论：<b>登录态不是按小时过期的</b>，但确实会“突然失效”。分清“平台原因”和“被你弄乱”两类，才能对症下药。</p>
+
+    <table>
+      <thead><tr><th>现象</th><th>本质</th><th>是否你的操作导致</th><th>处理</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>隔几天要重新扫码</td>
+          <td>视频号登录态存于每个账号独立的浏览器档案 <code>user_data_dir</code>（如 <code>profiles/default</code>），平台 token 通常维持数天~数周，但平台侧可随时让 token 失效 / 踢下线。</td>
+          <td><span class="pill p-ok">不是</span></td>
+          <td>重新扫码即可；属正常现象。</td>
+        </tr>
+        <tr>
+          <td>点开一直卡在登录页、扫码后无反应</td>
+          <td>浏览器进程被强制结束（任务管理器杀进程、断电、蓝屏）→ cookie/缓存写入不完整 → 登录态损坏。</td>
+          <td><span class="pill p-warn">部分</span></td>
+          <td>用该账号的<b>“清空档案”</b>按钮重来（会自动备份）。</td>
+        </tr>
+        <tr>
+          <td>打开即报 <code>exitCode=21</code> / “Settings version is not 1”</td>
+          <td>同一个账号档案被<b>不同浏览器内核</b>（Edge/Chrome/Chromium）打开过，档案版本不兼容。</td>
+          <td><span class="pill p-bad">是</span></td>
+          <td>见第 2、3 节：内核已强制绑定，切换会自动清空。不要手动跨内核打开同一档案。</td>
+        </tr>
+        <tr>
+          <td>换内核后要求重新登录</td>
+          <td>这是<b>预期行为</b>：切换已登录账号到另一内核时，系统强制清空旧缓存。</td>
+          <td><span class="pill p-brand">设计如此</span></td>
+          <td>无需担心，按提示确认即可。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <b>自查清单（按顺序）：</b>
+      <ol style="margin:6px 0 0">
+        <li>该账号的浏览器窗口是否还开着？（同账号不能同时开两个窗口，会抢锁）</li>
+        <li>近期是否强制杀过浏览器进程？→ 用“清空档案”重置。</li>
+        <li>是否曾用别的浏览器手动打开过这个 profile 目录？→ 这就是 <code>exitCode=21</code> 的根因，已通过内核绑定杜绝。</li>
+        <li>以上都不是 → 纯平台踢线，重新扫码。</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- 二 -->
+  <section>
+    <h2><span class="n">2</span>账号 ↔ 浏览器内核 强制绑定（核心规则）</h2>
+    <p>每个账号在第一次被某内核（Edge / Chrome / Chromium）成功打开后，该内核会被记录在 <code>working_kernels.json</code>（与启动器共享）。之后该账号<b>只能用这个内核</b>打开，杜绝跨内核损坏。</p>
+
+    <table>
+      <thead><tr><th>操作</th><th>已登录(有缓存)</th><th>未登录(空档案)</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>切到<b>相同</b>内核</td>
+          <td><span class="pill p-ok">允许，直接生效</span></td>
+          <td><span class="pill p-ok">允许</span></td>
+        </tr>
+        <tr>
+          <td>切到<b>不同</b>内核（未登录）</td>
+          <td>—</td>
+          <td><span class="pill p-ok">允许</span>，并记录新内核</td>
+        </tr>
+        <tr>
+          <td>切到<b>不同</b>内核（已登录）</td>
+          <td colspan="2" style="text-align:center"><span class="pill p-bad">拦截！必须“清空档案”</span>：弹窗确认后，旧缓存备份到 <code>profile_backups/</code>，再绑定新内核。取消则恢复原选择。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <b>为什么不能随便切？</b> 视频号档案不是“纯文本配置”，而是浏览器内核写入的二进制状态。Edge 写的档案用 Chrome 打开会因「Settings 版本号不匹配」直接崩溃（exitCode=21）。强制绑定 = 让“哪个账号=哪个浏览器”成为只读事实，从根上消除这类损坏。
+    </div>
+
+    <h3>“内核去重”合规看板</h3>
+    <p class="muted">账号管理页顶部有合规横幅：若检测到多个账号绑定了<b>同一个</b>内核（非必须但不推荐），会提示你拆分；全部互异时显示绿色通过状态。注意：不同内核才是真隔离，<b>同一个内核多账号只是“分时复用”，仍可同时登录、但共用一个浏览器进程族</b>。</p>
+  </section>
+
+  <!-- 三 -->
+  <section>
+    <h2><span class="n">3</span>切换内核 / 清空档案 流程</h2>
+    <div class="flow">
+      <div class="step"><div class="t">① 改内核</div><div class="d">在账号行的内核下拉框选择新内核</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="t">② 判断</div><div class="d">有缓存且目标≠原内核？→ 需清空</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="t">③ 确认</div><div class="d">弹窗“将清空旧缓存，是否继续？”</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="t">④ 清空</div><div class="d">旧目录备份到 profile_backups/，重建空档案，忘记旧内核，删除登录身份</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="t">⑤ 绑定</div><div class="d">写入新内核，下次用新内核登录</div></div>
+    </div>
+    <p class="muted">若旧档案为空（从未登录），则第 ② 步判定“无需清空”，直接绑定，无弹窗。</p>
+    <div class="callout ok">
+      也可在账号行点 <b>“清空档案”</b> 按钮手动重置（带确认）；用于登录态损坏、卡死、想彻底重来时。清空≠删除账号，账号配置保留，只是浏览器缓存归零。
+    </div>
+  </section>
+
+  <!-- 四 -->
+  <section>
+    <h2><span class="n">4</span>统一发布 vs 错峰发布</h2>
+    <p>发布页顶部新增<b>模式切换</b>。务必先选模式，再填内容。</p>
+    <div class="grid2">
+      <div class="card">
+        <h4>🔵 统一模式（默认）</h4>
+        <ul>
+          <li>所有账号用<b>同一份</b>标题 / 描述 / 封面 / 可见性 / 原创。</li>
+          <li>错峰时间归零（同时发）。</li>
+          <li>每账号差异化配置被忽略（不覆盖已存配置）。</li>
+          <li>适合：内容完全一致、想一键群发。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>🟠 错峰模式</h4>
+        <ul>
+          <li>每账号可<b>各自不同</b>标题/描述/封面/可见性。</li>
+          <li>按 <code>stagger_minutes</code> 错开发布，降低限流风险。</li>
+          <li>开启<b>单原创互斥</b>（见第 5 节）。</li>
+          <li>适合：矩阵号运营、需差异化与防限流。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">
+      <b>后端强制：</b> 即便前端被绕过，<code>publish_mode=unified</code> 时服务端也会把 variants 置空、错峰归零；<code>stagger</code> 才保留差异化。前端隐藏+禁用只是体验层，后端才是最终闸门。
+    </div>
+  </section>
+
+  <!-- 五 -->
+  <section>
+    <h2><span class="n">5</span>单原创互斥（平台硬规则）</h2>
+    <p>视频号平台规定：<b>同一个视频最多只能由 1 个账号声明“原创”</b>，其余账号若勾选会被判违规/取消。</p>
+    <table>
+      <thead><tr><th>你做的操作</th><th>系统行为</th></tr></thead>
+      <tbody>
+        <tr><td>在全局或某账号勾选“原创”</td><td>其它所有“原创”勾选框<b>自动取消并置灰</b></td></tr>
+        <tr><td>取消当前唯一的“原创”</td><td>置灰解除，可再选另一个账号</td></tr>
+        <tr><td>后端发布时</td><td>再次校验：仅保留 1 个原创账号，多余的全部降级为非原创</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn">错峰模式下尤其注意：不要给多个账号都打“原创”。系统会强制只留一个，避免平台处罚。</div>
+  </section>
+
+  <!-- 六 -->
+  <section>
+    <h2><span class="n">6</span>每号 AI 填空 / 每号合集</h2>
+    <div class="grid2">
+      <div class="card">
+        <h4>✨ 本号 AI 填空</h4>
+        <p class="muted">在错峰模式下，每个账号卡片都有独立的“✨ 本号 AI 填空”按钮。点它会<b>只填充该账号</b>的标题/描述等字段（基于视频内容本地生成，不调用外部 LLM 时走兜底文案），不会改动其它账号。</p>
+      </div>
+      <div class="card">
+        <h4>📚 每号合集（Collections）</h4>
+        <p class="muted">每个账号可<b>各自选择</b>要归入的合集（下拉框 <code>ov_collection_&lt;id&gt;</code>）。不同账号即使发同一视频，也能归到各自账号名下的不同合集。统一模式下沿用全局合集。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 七 -->
+  <section>
+    <h2><span class="n">7</span>ego-lite 有采用的必要吗？</h2>
+    <div class="callout bad" style="border-color:#b91c1c">
+      <b>结论：对本项目的自动化发布流程，<u>没有必要采用</u>。</b>
+    </div>
+    <table>
+      <thead><tr><th>维度</th><th>本项目（browser-use + Playwright）</th><th>ego-lite</th></tr></thead>
+      <tbody>
+        <tr><td>技术形态</td><td>Playwright 内核，可被代码程序化驱动</td><td>Electron 桌面应用，<b>不是</b> Playwright 内核</td></tr>
+        <tr><td>能否被自动调度</td><td><span class="pill p-ok">能</span>（脚本直接操控浏览器）</td><td><span class="pill p-bad">不能</span>（只能人手动用）</td></tr>
+        <tr><td>在本项目里的角色</td><td>发布自动化的执行引擎</td><td>仅是“手动共享浏览器”工具，无法接入发布流水线</td></tr>
+      </tbody>
+    </table>
+    <div class="callout">
+      <b>系统组件请勿卸载：</b> Edge 与 WebView2 是 Windows 系统组件，<b>不要</b>为了“腾空间”卸载它们——本项目的默认内核就依赖 Edge/WebView2 通道，卸载会导致自动化打不开浏览器。ego-lite 与本项目内核互不替代。
+    </div>
+    <p class="muted">如果你只是想“手动用另一个浏览器看看视频号后台”，ego-lite 可作个人备用；但它<b>不参与</b>本项目的多账号自动发布，也不会因为装上它而增强自动化能力。</p>
+  </section>
+
+  <!-- 八 -->
+  <section>
+    <h2><span class="n">8</span>操作速查 & 故障排查</h2>
+    <table>
+      <thead><tr><th>场景</th><th>正确做法</th></tr></thead>
+      <tbody>
+        <tr><td>隔阵子要重登</td><td>正常，重新扫码；非配置问题。</td></tr>
+        <tr><td>卡登录/扫码无效</td><td>该账号行点“清空档案”→重扫。</td></tr>
+        <tr><td>想换浏览器内核</td><td>未登录直接切；已登录会弹确认清空旧缓存。</td></tr>
+        <tr><td>群发同内容</td><td>发布页选<b>统一模式</b>。</td></tr>
+        <tr><td>矩阵号差异化防限流</td><td>选<b>错峰模式</b> + 每号 AI 填空 + 仅 1 个原创。</td></tr>
+        <tr><td>多号都勾了原创</td><td>系统自动只留 1 个，其余置灰取消。</td></tr>
+        <tr><td>同账号开两个窗口</td><td>不允许（抢锁）；关掉一个再开。</td></tr>
+        <tr><td>是否装 ego-lite</td><td>对自动化无帮助，可不装；别卸 Edge/WebView2。</td></tr>
+      </tbody>
+    </table>
+    <div class="legend">
+      <span><span class="dot" style="background:#15803d"></span>允许/正常</span>
+      <span><span class="dot" style="background:#b45309"></span>需注意</span>
+      <span><span class="dot" style="background:#b91c1c"></span>禁止/拦截</span>
+      <span><span class="dot" style="background:#2563eb"></span>设计行为</span>
+    </div>
+  </section>
+
+  <footer>
+    本文档由 self-audit 自动校验配套：账号内核绑定守卫、发布模式解析等回归测试均处于 172/0 通过状态。<br/>
+    生成于项目 docs/操作规范.html · 与代码逻辑保持一致。
+  </footer>
+
+</div>
+</body>
+</html>

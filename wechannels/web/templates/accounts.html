@@ -4,6 +4,19 @@
 <h2>账号管理</h2>
 <p><a href="/">返回面板</a></p>
 {{ msg|safe }}
+{% if distinct and distinct.dups %}
+<div class="msg warn">
+  <b>⚠️ 浏览器内核重复：</b>以下账号共用同一内核，指纹容易被关联。
+  建议不同账号分配不同内核（Chrome / Edge / 内置 Chromium），再配合错峰与差异化发布降低限流风险。
+  <ul style="margin:6px 0 0 18px;padding:0">
+    {% for d in distinct.dups %}<li>内核 <b>{{ d.kernel }}</b>：{{ d.labels|join('、') }}</li>{% endfor %}
+  </ul>
+  <div style="margin-top:5px" class="muted">共 {{ distinct.total }} 个启用账号，用了 {{ distinct.distinct }} 种内核。
+    换内核对<b>已登录</b>账号会先清空旧档案并需重扫（见下）。</div>
+</div>
+{% elif distinct and distinct.total > 1 %}
+<div class="msg ok">✅ 启用账号的内核已各不相同（{{ distinct.total }} 个账号 / {{ distinct.distinct }} 种内核），指纹隔离良好。</div>
+{% endif %}
 <div class="card">
   <h3>新增账号</h3>
   <form method="post" action="/accounts/new">
@@ -28,6 +41,7 @@
   <h3>已有账号</h3>
   <p class="muted">「扫码登录」会弹出一个浏览器窗口：未登录时页面会出现二维码，用微信扫码并确认即可；登录态会保存到该账号的档案目录，之后发布/监控都免扫码。每个账号要分别扫一次（用对应的微信号扫）。</p>
   <p class="muted">✅ <b>不同账号 = 不同的浏览器</b>：每个账号都有自己独立的档案目录（登录态互不影响），再配合下面「浏览器内核」可分别指定 <b>Chrome / Edge</b>。所以两个账号可以<b>同时打开、同时操作、互不打架</b>。</p>
+  <p class="muted">🔒 <b>账号已绑定浏览器内核（不能随意切换）</b>：档案是由某个内核创建的，换另一个内核打开会因格式不兼容直接失败（exitCode=21）。所以账号首次登录后会固定用那个内核打开；确需换内核时，系统会先<b>自动备份并清空该账号旧档案</b>，并要求<b>重新扫码登录</b>。切换/清空前请先关掉该账号所有浏览器窗口。</p>
   <p class="muted">⚠️ 唯一的限制是<b>同一个账号</b>不能被两个进程同时打开（Chromium 的硬规则：一个档案同一时刻只能被一个进程占用）。因此面板点「扫码登录 / 打开发表页」时会自动为<b>这个账号</b>暂停后台监控（把档案让出来），关掉窗口后自动恢复；<b>其它账号不受影响，监控照常</b>。手动用终端跑 monitor_dm.py 的话请先 Ctrl+C，否则会出现「明明刚登录过，打开发表页却是未登录」。</p>
   <table><tr><th>ID</th><th>名称</th><th>档案目录</th><th>浏览器内核</th><th>状态</th><th>当前</th><th>登录态 / 实际视频号</th><th>操作</th></tr>
   {% include 'partials/account_rows.html' %}

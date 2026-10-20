@@ -181,6 +181,20 @@
 .accvar .avhead{font-weight:600;margin-bottom:8px;font-size:13.5px;color:var(--fg)}
 .accvar .avhead .muted{font-weight:400;margin-left:6px}
 .accvar textarea{min-height:70px}
+/* 发布模式切换（统一 / 错峰）：分段按钮，只显示当前模式对应的区块 */
+.pubmode{display:flex;gap:8px;margin:2px 0 10px;flex-wrap:wrap}
+.pmode{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;
+  border:1px solid var(--line);background:var(--elev);cursor:pointer;font-size:13px;
+  transition:border-color .15s,background .15s}
+.pmode input{accent-color:var(--acc)}
+.pmode .muted{font-size:11px;margin-left:4px}
+.pmode.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 14%,var(--elev));
+  box-shadow:0 0 0 1px var(--acc) inset}
+/* 单原创互斥：被置灰的原创勾选（不可勾） */
+.origchk:disabled{filter:grayscale(1);opacity:.45;cursor:not-allowed}
+.origlabel:has(input:disabled){opacity:.6}
+/* 账号级差异化字段：输入框统一风格 */
+.accvar .ovfield{width:100%}
 /* 登录态圆点 */
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
 .dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}

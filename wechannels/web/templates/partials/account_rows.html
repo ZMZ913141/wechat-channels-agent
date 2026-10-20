@@ -6,12 +6,19 @@
   <td>{{ a.name }}</td>
   <td class="muted"><code>{{ a.profile_dir }}</code></td>
   <td>
-    <form method="post" action="/accounts/{{ a.id }}/channel" style="display:flex;gap:6px;align-items:center">
-      <select name="channel" onchange="this.form.submit()" style="padding:4px 6px;font-size:12px">
+    <form method="post" action="/accounts/{{ a.id }}/channel" class="chform"
+          data-has="{{ '1' if accounts_has_data(a) else '0' }}"
+          data-cur="{{ accounts_channel(a) }}"
+          style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <select name="channel" onchange="onChannelChange(this)" style="padding:4px 6px;font-size:12px">
         {% for val, label in channels.items() %}
         <option value="{{ val }}"{{ ' selected' if accounts_channel(a) == val else '' }}>{{ label }}</option>
         {% endfor %}
       </select>
+      <input type="hidden" name="clear" value="0">
+      {% if accounts_has_data(a) %}
+      <span class="muted" style="font-size:10px" title="该档案已被某内核创建（退出码 21 的根源）；换内核需清空重登">🔒 已绑定</span>
+      {% endif %}
     </form>
   </td>
   <td>{{ '✔ 启用' if a.enabled else '— 停用' }}</td>
@@ -30,6 +37,11 @@
     <a class="ghost btn" href="/accounts/{{ a.id }}/resume"
        title="该账号正被「手动操作」暂停，发布会被拒绝；点这里提前解除">解除暂停</a>
     {% endif %}
+    {# 清空档案：换内核 / 怀疑缓存被搞乱 / 迁移浏览器 时用；旧档案自动备份 #}
+    <form method="post" action="/accounts/{{ a.id }}/clearprofile" style="display:inline"
+          onsubmit="return confirm('确认清空账号「{{ a.name }}」的浏览器档案？\n\n· 登录态 / Cookie / 缓存会一并清除，需重新扫码登录\n· 旧档案会备份到 state/profile_backups/\n\n用于：换浏览器内核、或怀疑缓存被搞乱。')">
+      <button class="ghost btn" type="submit" title="清空该账号浏览器档案并强制重新登录">清空档案</button>
+    </form>
     {# 删除账号代价最高（登录态一起没了，要重新扫码），故用 POST + 二次确认 #}
     <form method="post" action="/accounts/{{ a.id }}/delete" style="display:inline"
           onsubmit="return confirm('确认删除账号「{{ a.name }}」？\n\n· 只删配置，浏览器档案目录会保留\n· 但下次要用它发布时，可能需要重新扫码登录')">
@@ -38,3 +50,20 @@
   </td>
 </tr>
 {% endfor %}
+<script>
+/* 内核切换守卫：已登录过的档案（data-has=1）换内核 → 必须先清空旧档案，
+   否则新内核打不开旧档案（exitCode=21），用户会误以为「切了但没生效」。 */
+function onChannelChange(sel){
+  var f = sel.form, has = f.dataset.has === '1', cur = f.dataset.cur, nv = sel.value;
+  if (nv === cur) return;
+  if (!has) { f.submit(); return; }         // 空档案：直接切，不用清
+  if (confirm('该账号已经登录过，浏览器档案由原内核创建。\n\n'
+            + '换内核会清空它的旧档案（登录态/缓存，自动备份），并需要重新扫码登录。\n\n'
+            + '确定「清空并切换」吗？')) {
+    f.querySelector('input[name=clear]').value = '1';
+    f.submit();
+  } else {
+    sel.value = cur;   // 取消 → 还原选择
+  }
+}
+</script>

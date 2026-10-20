@@ -166,12 +166,23 @@ def parse_publish_form(r) -> dict:
     if stagger_minutes < 0:
         stagger_minutes = 0
 
+    # 发布模式：unified=统一（所有账号共用上方一套内容，忽略每账号差异化与错峰）；
+    # stagger=错峰（启用每账号差异化 + 间隔）。未显式传参时保持旧行为（按错峰处理），
+    # 以免破坏已有调用/测试。
+    mode = (r.form.get("publish_mode") or "").strip().lower()
+    if mode not in ("unified", "stagger"):
+        mode = "stagger"
+    if mode == "unified":
+        variants = {}
+        stagger_minutes = 0
+
     return {
         "mids": mids,
         "acc_ids": acc_ids,
         "overrides": overrides,
         "variants": variants,
         "stagger_minutes": stagger_minutes,
+        "mode": mode,
     }
 
 
@@ -180,16 +191,19 @@ def publish_start():
     p = parse_publish_form(request)
     mids, acc_ids = p["mids"], p["acc_ids"]
     overrides, variants, stagger_minutes = p["overrides"], p["variants"], p["stagger_minutes"]
+    mode = p.get("mode", "stagger")
     if not mids:
         return redirect(url_for("publish_page", err="请先选择要发布的素材"))
     if not acc_ids:
         return redirect(url_for("publish_page", err="请至少选择一个发布账号"))
-    # 保存「按账号差异化」配置（可复用：下次发同一条素材到同批账号时记得上次的分化）
-    for mid in mids:
-        try:
-            materials.set_variants(mid, variants)
-        except Exception:
-            pass
+    # 保存「按账号差异化」配置（可复用：下次发同一条素材到同批账号时记得上次的分化）。
+    # 统一发布模式不写 variants —— 否则会把用户之前存好的差异化配置清空。
+    if mode != "unified" and variants:
+        for mid in mids:
+            try:
+                materials.set_variants(mid, variants)
+            except Exception:
+                pass
     try:
         # 逐个素材依次发布（单任务线程内串行，避免多号并发抢带宽与风控）
         for mid in mids:

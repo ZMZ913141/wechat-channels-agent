@@ -93,6 +93,20 @@ def accounts_page():
     elif m == "channel":
         msg = ('<div class="msg ok">已更新浏览器内核。下次打开窗口（扫码登录 / 打开发表页 / 发布）'
                '就会用新内核；正在运行的窗口不受影响。</div>')
+    elif m == "channelcleared":
+        msg = ('<div class="msg ok">已清空该账号的旧浏览器档案并切换内核。'
+               '旧档案已备份到 <code>state/profile_backups/</code>；'
+               '因为换了浏览器内核，<b>需要重新扫码登录</b>一次。</div>')
+    elif m.startswith("needclear:"):
+        msg = ('<div class="msg bad">⚠️ 该账号已经登录过，直接换浏览器内核会打不开它的旧档案'
+               '（格式不兼容，表现为 exitCode=21）。<br>'
+               '请点该行的<b>「切换内核」</b>并按提示确认——会自动备份并清空旧档案，'
+               '然后<b>重新扫码登录</b>。<br>'
+               '<span class="muted">（若只是想换个浏览器又不介意重登，也可以直接点「清空档案」。）</span></div>')
+    elif m.startswith("cleared:"):
+        msg = (f'<div class="msg ok">已清空账号「{html.escape(m[8:])}」的浏览器档案'
+               '（旧档案已备份到 <code>state/profile_backups/</code>），'
+               '请重新<b>扫码登录</b>。</div>')
     elif m.startswith("err:"):
         msg = f'<div class="msg bad">操作失败：{html.escape(m[4:])}</div>'
     return render_template(
@@ -101,6 +115,7 @@ def accounts_page():
         cur=cur,
         msg=msg,
         channels=accounts.CHANNEL_LABELS,
+        distinct=accounts.kernel_distinct_status(),
         title="账号管理",
     )
 
@@ -208,10 +223,37 @@ def accounts_resume(aid):
 
 @app.route("/accounts/<aid>/channel", methods=["POST"])
 def accounts_set_channel(aid):
+    """切换浏览器内核。**已登录过的账号必须先清空旧档案**才能切，否则打不开。"""
     acc = accounts.get_account(aid)
-    if acc:
-        accounts.update_account(aid, {"channel": request.form.get("channel", "").strip().lower()})
-    return redirect(url_for("accounts_page", msg="channel"))
+    if not acc:
+        return redirect(url_for("accounts_page", msg="nodup"))
+    new_ch = (request.form.get("channel") or "").strip().lower()
+    clear = (request.form.get("clear") or "0").strip().lower() in ("1", "true", "yes", "on")
+    if accounts.channel_switch_needs_clear(acc, new_ch):
+        if not clear:
+            # 没确认清空 → 拒绝，回面板给出解释（绝不让用户「以为切了其实没切」）
+            return redirect(url_for("accounts_page", msg="needclear:" + aid))
+        r = accounts.clear_profile(acc)
+        if not r.get("ok"):
+            return redirect(url_for("accounts_page", msg="err:清空旧档案失败：" + (r.get("error") or "")))
+    accounts.update_account(aid, {"channel": new_ch})
+    return redirect(url_for("accounts_page", msg=("channelcleared" if clear else "channel")))
+
+
+@app.route("/accounts/<aid>/clearprofile", methods=["POST"])
+def accounts_clear_profile(aid):
+    """清空该账号浏览器档案（登录态/缓存），强制重新扫码。
+
+    这是「不同账号/不同浏览器之间不串数据」的强制落地：想换内核、怀疑缓存被
+    搞乱、或要把账号迁到另一个浏览器时，都先清空，避免旧 Cookie/指纹残留。
+    """
+    acc = accounts.get_account(aid)
+    if not acc:
+        return redirect(url_for("accounts_page", msg="nodup"))
+    r = accounts.clear_profile(acc)
+    if not r.get("ok"):
+        return redirect(url_for("accounts_page", msg="err:清空档案失败：" + (r.get("error") or "")))
+    return redirect(url_for("accounts_page", msg="cleared:" + (acc.get("name") or aid)))
 
 
 @app.route("/accounts/<aid>/set_current")

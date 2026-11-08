@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="8" fill="#e2472e"/>
+  <rect x="5" y="5" width="54" height="54" rx="5" fill="none" stroke="#ffffff" stroke-opacity=".38" stroke-width="2.5"/>
+  <text x="32" y="33.5" font-family="'Noto Serif SC','Songti SC',SimSun,serif" font-size="36" font-weight="900" fill="#ffffff" text-anchor="middle" dominant-baseline="central">发</text>
+</svg>

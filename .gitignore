@@ -1,21 +1,40 @@
-# 依赖与运行环境
-.venv/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
 
-# 本地状态（账号/素材/心跳/通知记录，含可能的敏感信息）
+# 环境与数据（.env 含真实密钥，绝不能入库）
+.env
+.env.local
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# 运行时数据（全部在外部 WX_DATA_DIR，不入库）
 state/
+logs/
+shots/
+thumbs/
 profiles/
 browser_profile/
 media/
 
-# 敏感配置
-.env
+# 本地辅助产物
+out.log
+*.log
+.workbuddy/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tunnel_url.txt
+穿透.txt
 
-# 编辑器/系统
+# IDE
 .vscode/
 .idea/
+*.swp
 .DS_Store
-
-# WorkBuddy 本地记忆
-.workbuddy/

@@ -1,0 +1,103 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多平台发布台 · Ink Desk</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.cn">
+<link rel="stylesheet" href="https://fonts.googleapis.cn/css2?family=Noto+Serif+SC:wght@600;700;900&family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/static/css/app.css?v=3.28">
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+
+<!-- ============ 登录 ============ -->
+<div id="login" class="login">
+  <div class="login-card rise">
+    <div class="login-seal">发</div>
+    <h1 class="login-title">多平台发布台</h1>
+    <p class="login-sub">视频号 · 抖音 · 小红书 — 本地自动发布工作台</p>
+    <label class="fld">用户名<input id="lg-user" autocomplete="username"></label>
+    <label class="fld">密码<input id="lg-pass" type="password" autocomplete="current-password"></label>
+    <div class="row" style="margin-top:14px;">
+      <button class="btn btn-primary" id="btn-login">登 录</button>
+      <button class="btn btn-ghost" id="btn-toggle-reg">注册新账号</button>
+    </div>
+    <div id="reg-box" class="reg-box" hidden>
+      <div class="hint" style="font-size:12px;color:var(--paper-3);margin-bottom:10px;">
+        直接用上面填的用户名和密码注册（密码至少 6 位）；显示名只影响界面右上角。
+      </div>
+      <label class="fld">显示名（可选）<input id="rg-name" placeholder="在界面右上角显示"></label>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn btn-jade" id="btn-register">注册并登录</button>
+        <button class="btn btn-ghost" id="btn-toggle-reg2">返回登录</button>
+      </div>
+    </div>
+    <div id="lg-msg" class="login-msg"></div>
+  </div>
+  <div class="login-foot">第一次使用？点「注册新账号」即可创建本地账号 · 数据不出本机</div>
+</div>
+
+<!-- ============ 主应用 ============ -->
+<div class="app" id="app" hidden>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-seal">发</div>
+      <div class="brand-text">多平台发布台<small>INK DESK · V3.3</small></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-section">工作区</div>
+      <a class="nav-item active" data-page="today"><i>01</i><span>今日排期</span></a>
+      <a class="nav-item" data-page="library"><i>02</i><span>素材库</span></a>
+      <a class="nav-item" data-page="queue"><i>03</i><span>发布队列</span></a>
+      <a class="nav-item" data-page="audit"><i>04</i><span>审计日志</span></a>
+      <a class="nav-item" data-page="dashboard"><i>05</i><span>数据看板</span></a>
+      <a class="nav-item" data-page="comments"><i>06</i><span>评论管理</span></a>
+      <a class="nav-item" data-page="messages"><i>07</i><span>私信管理</span></a>
+      <div class="nav-section">系统</div>
+      <a class="nav-item" data-page="accounts"><i>08</i><span>账号管理</span></a>
+      <a class="nav-item" data-page="settings"><i>09</i><span>设置</span></a>
+    </nav>
+    <div class="side-foot">串行 · 错峰 · 低频<br>每次发布全程留痕</div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="page-head">
+        <span class="page-kicker" id="page-kicker">WORKSPACE / 01</span>
+        <h1 id="page-title">今日排期</h1>
+      </div>
+      <div class="topbar-right">
+        <button class="chip" id="ai-chip" title="AI 写文案状态">AI · 检测中</button>
+        <button class="btn btn-ghost btn-sm" id="btn-test-ai">测试 AI</button>
+        <span class="divider"></span>
+        <button class="btn btn-ghost btn-sm" id="btn-scan">扫描收件箱</button>
+        <button class="btn btn-primary btn-sm" id="btn-upload">上传素材</button>
+        <input id="file-in" type="file" accept="video/*" hidden>
+        <span class="divider"></span>
+        <span id="who" class="who"></span>
+        <button class="btn btn-ghost btn-sm" id="btn-logout">退出</button>
+      </div>
+    </header>
+
+    <div class="content">
+      <section class="page active" id="page-today"></section>
+      <section class="page" id="page-library"></section>
+      <section class="page" id="page-queue"></section>
+      <section class="page" id="page-audit"></section>
+      <section class="page" id="page-dashboard"></section>
+      <section class="page" id="page-comments"></section>
+      <section class="page" id="page-messages"></section>
+      <section class="page" id="page-accounts"></section>
+      <section class="page" id="page-settings"></section>
+    </div>
+  </main>
+</div>
+
+<div id="toast" class="toast" role="status"></div>
+<div id="modal-root"></div>
+
+<script type="module" src="/static/js/main.js?v=3.29"></script>
+</body>
+</html>

@@ -3,6 +3,8 @@
 视频号 / 抖音 / 小红书 多用户、多账号、本地自动发布工作台。
 支持：素材管理、AI 自动写标题/描述/话题、选合集、自定义封面、AI 标识、错峰发布、后台到点自动执行、发布审计日志。
 
+![今日排期](docs/screenshot-today.png)
+
 ## 环境要求（首次必看）
 
 1. 安装 [Python 3.11+](https://www.python.org/) 和 [uv](https://docs.astral.sh/uv/)。
@@ -27,7 +29,7 @@
 uv sync --extra dev                          # 首次安装依赖（含测试框架）
 uv run python -c "from wchannels.db import init_db; init_db()"  # 初始化数据库
 uv run uvicorn wchannels.web.app:create_app --factory --host 127.0.0.1 --port 8734
-uv run pytest -q                             # 回归测试（应 42 项全绿）
+uv run pytest -q                             # 回归测试（应 53 项全绿）
 ```
 
 ## 目录结构

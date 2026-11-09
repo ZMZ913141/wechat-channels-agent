@@ -156,11 +156,15 @@ def _validate_copy(data: dict, filename: str, platform: str,
 
 def generate_copy(filename: str, extra_hint: str = "", platform: str = "wechat",
                   title_hint: str = "", description_hint: str = "",
-                  transcript: str = "") -> dict:
-    """返回 {short_title, description, topics, ai_used}。
+                  transcript: str = "", examples: list[dict] | None = None) -> dict:
+    """返回 {short_title, description, topics, ai_used, ai_draft}。
 
     ai_used=True 表示真调了 LLM；False 表示走了本地兜底（没配 key / 调用失败）。
+    examples：该平台近期已发布的文案样例（含用户编辑过的），用于 few-shot 学风格。
+    ai_draft：本次 AI 输出的原始文案 JSON（存库，下一轮判断用户是否编辑过）。
     """
+    import json as _json
+    examples = examples or []
     parts = [f"视频文件名：{filename}"]
     if title_hint:
         parts.append(f"已有标题：{title_hint}")
@@ -170,6 +174,18 @@ def generate_copy(filename: str, extra_hint: str = "", platform: str = "wechat",
         parts.append(
             "视频文案/口播稿（这是这条视频的真实内容，请以它为核心提炼卖点，"
             "不要编造文案里没有的信息）：\n" + transcript[:2000]
+        )
+    if examples:
+        ex_lines = []
+        for i, ex in enumerate(examples[:3], 1):
+            ex_lines.append(
+                f"{i}) 标题：{ex.get('title', '')}\n"
+                f"描述：{ex.get('description', '')}\n"
+                f"话题：{ex.get('topics', '')}"
+            )
+        parts.append(
+            "以下是该平台近期已发布、经人工确认的文案样例，请保持类似的卖点结构和"
+            "语言风格（不要照抄，要贴合本条视频内容）：\n" + "\n\n".join(ex_lines)
         )
     if extra_hint:
         parts.append(f"补充要求：{extra_hint}")
@@ -199,9 +215,15 @@ def generate_copy(filename: str, extra_hint: str = "", platform: str = "wechat",
         data2 = _call(f"上一版不合格：{issue}。请重新生成，确保标题有具体卖点、不使用空泛口水词。")
         if data2 is not None:
             result2, _, _ = _validate_copy(data2, filename, platform, transcript)
-            # 第二版仍可能有问题，但至少过了清洗；取更优的（标题更长的）
             if len(result2["short_title"]) > len(result["short_title"]):
                 result = result2
+                data = data2
+    # 存本次 AI 输出的原始文案（清洗后），用于下一轮判断用户是否编辑过
+    result["ai_draft"] = _json.dumps(
+        {"title": result["short_title"], "description": result["description"],
+         "topics": result["topics"]},
+        ensure_ascii=False,
+    )
     return result
 
 
@@ -248,4 +270,5 @@ def _local_fallback(filename: str, platform: str = "wechat", transcript: str = "
         "description": desc,
         "topics": "女装,穿搭,显瘦",
         "ai_used": False,
+        "ai_draft": "",
     }

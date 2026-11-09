@@ -261,6 +261,46 @@ def to_ready(session: Session, material: Material) -> Material:
     return material
 
 
+def recent_copy_examples(session: Session, user_id: int, platform: str,
+                         limit: int = 3) -> list[dict]:
+    """取该用户在该平台近期已发布的文案，作为 AI few-shot 风格样例。
+
+    优先取「用户编辑过」的（ai_draft 里的标题与最终 short_title 不同）——
+    这才是真正反映用户偏好的样本；不足再用任意已发布的补齐。
+    每条返回 {"title", "description", "topics"}。
+    """
+    rows = session.exec(
+        select(Material)
+        .where(Material.user_id == user_id,
+               Material.status == MaterialStatus.PUBLISHED.value)
+        .order_by(Material.updated_at.desc())
+        .limit(30)
+    ).all()
+    examples: list[dict] = []
+    edited: list[dict] = []
+    for m in rows:
+        if not m.short_title:
+            continue
+        was_edited = True
+        if m.ai_draft:
+            try:
+                draft = json.loads(m.ai_draft)
+                was_edited = (draft.get("title") or "") != (m.short_title or "")
+            except Exception:
+                was_edited = True
+        item = {"title": m.short_title, "description": m.description or "",
+                "topics": m.topics or ""}
+        (edited if was_edited else examples).append(item)
+    # 编辑过的优先，不足再补普通已发布
+    out = edited[:limit]
+    for item in examples:
+        if len(out) >= limit:
+            break
+        if not any(e["title"] == item["title"] for e in out):
+            out.append(item)
+    return out
+
+
 def mark_published(session: Session, material: Material) -> None:
     material.status = MaterialStatus.PUBLISHED.value
     material.updated_at = now()

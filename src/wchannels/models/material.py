@@ -31,6 +31,7 @@ class Material(SQLModel, table=True):
     ai_disclosure: str = ""       # AI 标识文案（留空=不标注）
     collection: str = ""      # 视频号合集名（发布时选入对应合集）
     tags: str = ""            # 分区标签（逗号分隔，如「服装,备用」），素材库按标签分区
+    ai_draft: str = ""        # 最近一次 AI 生成的原始文案(JSON：title/description/topics)，用于学习用户编辑偏好
 
     status: str = MaterialStatus.INBOX.value
     thumbnail_path: str = ""

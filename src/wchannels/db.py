@@ -38,6 +38,7 @@ def _ensure_columns() -> None:
         ("account", "platform", "VARCHAR DEFAULT 'wechat'"),
         ("material", "collection", "VARCHAR DEFAULT ''"),
         ("material", "tags", "VARCHAR DEFAULT ''"),
+        ("material", "ai_draft", "VARCHAR DEFAULT ''"),
         ("publishtarget", "collection", "VARCHAR DEFAULT ''"),
         ("publishtarget", "cover_path", "VARCHAR DEFAULT ''"),
         ("publishtarget", "comment", "VARCHAR DEFAULT ''"),

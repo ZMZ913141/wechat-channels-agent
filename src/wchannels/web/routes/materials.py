@@ -81,6 +81,8 @@ def autofill_material(mid: int, body: AutofillBody, session: Session = Depends(g
     if body.platform not in settings.PLATFORMS:
         raise HTTPException(400, f"未知平台：{body.platform}")
     # 按目标平台生成文案（此前恒用 wechat，README 宣称的"按平台风格"实际没接上）
+    # 拉该平台近期已发布文案做 few-shot，让 AI 学用户的语言风格
+    examples = svc.recent_copy_examples(session, user.id, body.platform, limit=3)
     copy = autofill.generate_copy(
         Path(m.file_path).name,
         extra_hint=body.extra_hint,
@@ -88,6 +90,7 @@ def autofill_material(mid: int, body: AutofillBody, session: Session = Depends(g
         title_hint=m.short_title or m.title,
         description_hint=m.description,
         transcript=body.transcript,
+        examples=examples,
     )
     if body.dry_run:
         # 配置面板「AI 辅助填写」：只把结果填进表单让用户确认，不自动保存/转状态
@@ -97,6 +100,7 @@ def autofill_material(mid: int, body: AutofillBody, session: Session = Depends(g
         short_title=copy["short_title"],
         description=copy["description"],
         topics=copy["topics"],
+        ai_draft=copy.get("ai_draft", ""),
     )
     # 小白最容易卡在「扫完素材 → 去队列发现勾不到」：文案齐了就直接转待发布
     if m.status == MaterialStatus.INBOX.value:

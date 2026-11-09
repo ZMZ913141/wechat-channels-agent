@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     # 评论采集（跟作品数据一起跑；有新评论会发飞书通知）
     COMMENTS_COLLECT_ENABLED: bool = True
 
+    # 登录态保活：定期打开各账号创作者后台（真实访问一次页面），
+    # 若平台是滑动过期则可顺带续期；同时兼作登录态巡检，掉线立刻飞书提醒。
+    # 频率别调太密（<2 小时）以免触发平台风控。
+    LOGIN_KEEPALIVE_ENABLED: bool = True
+    LOGIN_KEEPALIVE_INTERVAL_S: int = 10800   # 3 小时一轮
+    LOGIN_KEEPALIVE_START_DELAY_S: int = 600  # 启动后 10 分钟再跑第一轮，避免重启即批量开窗
+    LOGIN_KEEPALIVE_STAGGER_S: int = 20       # 每两个账号之间随机错峰的上限（模拟自然访问）
+
     # LLM
     LLM_API_KEY: str = ""
     LLM_MODEL: str = "deepseek-chat"

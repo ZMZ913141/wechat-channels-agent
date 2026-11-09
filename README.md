@@ -110,6 +110,10 @@ D:\wechat_channels_data\             ← 数据（外部，可改路径）
 - `PLATFORM_STAGGER_MIN`：各平台错峰间隔（分钟），如 `{"wechat":30,"douyin":20,"xiaohongshu":20}`
 - `SCHEDULER_ENABLED`：后台调度器开关
 - `SCHEDULER_INTERVAL_S`：调度器检查间隔（秒）
+- `LOGIN_KEEPALIVE_ENABLED`：登录态保活开关（默认开；每轮真实访问一次各账号后台，可延长滑动过期的登录态，并兼作掉线巡检）
+- `LOGIN_KEEPALIVE_INTERVAL_S`：保活间隔（秒，默认 10800=3 小时；不建议低于 2 小时，避免触发平台风控）
+- `LOGIN_KEEPALIVE_START_DELAY_S`：启动后多久跑首轮（秒，默认 600）
+- `LOGIN_KEEPALIVE_STAGGER_S`：账号间随机错峰上限（秒，默认 20，模拟自然访问）
 - `AUDIT_RETENTION_DAYS`：审计日志保留天数（默认 90，0 = 永久保留；调度器启动时清理）
 - `SECRET_KEY`：会话签名密钥，**本地部署可不动；公网部署务必改成一个随机长串**
 - `SESSION_EXPIRE_DAYS`：登录有效期（天）

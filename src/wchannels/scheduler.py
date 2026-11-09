@@ -1,4 +1,5 @@
 """后台调度器：定时轮询发布队列，自动执行到点的任务。"""
+import random
 import threading
 import time
 from datetime import datetime
@@ -22,6 +23,7 @@ class Scheduler:
     def __init__(self):
         self._thread: threading.Thread | None = None
         self._running = False
+        self._next_keepalive: float | None = None
 
     def start(self):
         if not settings.SCHEDULER_ENABLED:
@@ -60,6 +62,10 @@ class Scheduler:
                 self._stats_tick()
             except Exception:
                 log.exception("数据采集检查异常")
+            try:
+                self._keepalive_tick()
+            except Exception:
+                log.exception("登录态保活检查异常")
             time.sleep(settings.SCHEDULER_INTERVAL_S)
 
     def _stats_tick(self):
@@ -111,7 +117,7 @@ class Scheduler:
                     if r["error"]:
                         log.warning("私信采集 %s：%s", r["account_name"], r["error"])
                 # 登录态巡检：逐账号快速探测，掉线的写回状态并飞书提醒重扫
-                offline = self._probe_logins()
+                offline = self._probe_logins(only_new=True)
                 if offline:
                     from .core import notify
                     notify.send(
@@ -123,17 +129,63 @@ class Scheduler:
         except Exception:
             log.exception("数据采集失败")
 
-    def _probe_logins(self) -> list:
+    def _keepalive_tick(self):
+        """到点启动一轮登录态保活（后台线程跑，不阻塞发布队列）。
+
+        原理：打开一次账号创作者后台是真实访问；若平台对 session 做滑动续期，
+        这一下就能延长登录态。同时兼作巡检，掉线立即告警。
+        频率与时间抖动都可配，默认 3 小时一轮、±10% 抖动。
+        """
+        if not settings.LOGIN_KEEPALIVE_ENABLED:
+            return
+        now = time.time()
+        if self._next_keepalive is None:
+            delay = max(60, settings.LOGIN_KEEPALIVE_START_DELAY_S)
+            self._next_keepalive = now + delay
+            log.info("登录态保活已启用：%d 分钟后跑首轮，之后每 %d 小时一轮",
+                     delay // 60, settings.LOGIN_KEEPALIVE_INTERVAL_S // 3600)
+            return
+        if now < self._next_keepalive:
+            return
+        # 先预约下一轮再干活：本轮异常也不会打乱节奏，更不会紧循环重试
+        interval = max(1800, settings.LOGIN_KEEPALIVE_INTERVAL_S)
+        self._next_keepalive = now + interval * random.uniform(0.9, 1.1)
+        threading.Thread(target=self._keepalive_job, daemon=True).start()
+
+    def _keepalive_job(self):
+        from .core import notify
+        try:
+            offline = self._probe_logins(
+                only_new=True, stagger_s=max(0, settings.LOGIN_KEEPALIVE_STAGGER_S))
+            log.info("登录态保活巡检完成：%d 个账号新掉线", len(offline))
+            if offline:
+                notify.send(
+                    f"账号掉线提醒：{len(offline)} 个需要重新扫码",
+                    [f"{o['name']}（{PLATFORM_CN.get(o['platform'], o['platform'])}）："
+                     f"登录态已失效，请到「账号管理」点「登录（扫码）」" for o in offline],
+                    level="fail",
+                )
+        except Exception:
+            log.exception("登录态保活巡检异常")
+
+    def _probe_logins(self, only_new: bool = False, stagger_s: int = 0) -> list:
         """登录态巡检：逐账号快速探测并回写状态，返回掉线账号列表。
 
         与采集/发布同一把账号锁+profile锁：撞上正忙的账号本轮跳过（不判掉线），
         避免把「正在发布」误判成「掉线」。
+
+        only_new=True 时只返回「本次新掉线」的账号（库中原本就是 logged_out 的
+        不再重复提醒），避免每轮巡检都刷同一条飞书通知。
+        stagger_s > 0 时账号之间随机错峰等待，模拟自然访问节奏。
         """
         from .browser.loginprobe import probe_login
         offline = []
         with Session(get_engine()) as session:
             accounts = list(session.exec(select(Account)).all())
-        for a in accounts:
+        for idx, a in enumerate(accounts):
+            if stagger_s and idx:
+                time.sleep(random.uniform(0, stagger_s))
+            prev_status = a.status
             profile = settings.profiles_dir / a.profile_dir
             a_lock, p_lock = AccountLock(a.id), ProfileLock(profile)
             try:
@@ -149,8 +201,11 @@ class Scheduler:
                     if row:
                         acc_svc.detect_login(session, row, nick, logged_in)
                 if not logged_in:
-                    log.warning("巡检发现掉线：%s（%s）", a.name, a.platform)
-                    offline.append({"name": a.name, "platform": a.platform})
+                    if only_new and prev_status == "logged_out":
+                        log.info("巡检：%s 仍处掉线状态（不重复提醒）", a.name)
+                    else:
+                        log.warning("巡检发现掉线：%s（%s）", a.name, a.platform)
+                        offline.append({"name": a.name, "platform": a.platform})
             finally:
                 a_lock.release()
                 p_lock.release()

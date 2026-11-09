@@ -3,10 +3,12 @@ import httpx
 from ..config import settings
 
 
-def chat(prompt: str, system: str = "", timeout: int = 60, retries: int = 3) -> str:
+def chat(prompt: str, system: str = "", timeout: int = 60, retries: int = 3,
+         json_mode: bool = False) -> str:
     """调一次 chat completions，返回文本。未配置 key 抛 RuntimeError。
 
     对网关瞬时抖动做有限重试（聚合路由偶发 5xx / 错误 JSON）。
+    json_mode=True 时带 response_format=json_object（需网关支持）。
     """
     if not settings.LLM_API_KEY:
         raise RuntimeError("未配置 LLM_API_KEY")
@@ -16,11 +18,13 @@ def chat(prompt: str, system: str = "", timeout: int = 60, retries: int = 3) -> 
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    payload = {
+    payload: dict = {
         "model": settings.LLM_MODEL,
         "messages": messages,
         "temperature": 0.7,
     }
+    if json_mode and settings.LLM_JSON_MODE:
+        payload["response_format"] = {"type": "json_object"}
     last_err: Exception | None = None
     for attempt in range(retries):
         try:

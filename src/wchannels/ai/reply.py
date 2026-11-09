@@ -1,5 +1,12 @@
-"""AI 评论回复草稿：客服口吻、短句、不承诺不确定信息。"""
-from .client import chat, is_configured
+"""AI 评论/私信回复草稿：客服口吻、短句、不承诺不确定信息。
+
+输出约束（程序强制，不只靠 prompt）：
+- 评论 30 字内、私信 60 字内，超了在标点处截断不截半句；
+- 过滤口水词与广告法高风险词；
+- 去除包裹的引号。
+"""
+from . import client
+from .autofill import _sanitize, _truncate_at_punct
 
 SYSTEM = (
     "你是一个中文短视频账号的客服，负责回复观众评论。"
@@ -7,19 +14,6 @@ SYSTEM = (
     "3) 价格/库存/发货/尺码等无法确认的信息，只引导观众私信或看橱窗，不要编造；"
     "4) 不承诺退款、赔付、赠品；5) 不提及 AI，不加话题标签。"
 )
-
-
-def draft(comment_text: str, work_title: str = "", account_name: str = "") -> str:
-    """生成一条回复草稿。未配置 LLM 时抛 RuntimeError。"""
-    if not is_configured():
-        raise RuntimeError("AI 未配置（.env 里没有 LLM_API_KEY）")
-    prompt = (f"账号：{account_name or '本账号'}\n"
-              f"作品：{work_title or '（无标题）'}\n"
-              f"观众评论：{comment_text}\n"
-              "请给出一条回复。")
-    text = chat(prompt, system=SYSTEM).strip()
-    return text.strip('"“” ')[:120]
-
 
 DM_SYSTEM = (
     "你是一个中文短视频账号的客服，负责回复私信咨询。"
@@ -29,10 +23,32 @@ DM_SYSTEM = (
 )
 
 
+def _clean_reply(text: str, max_len: int) -> str:
+    """清洗 AI 回复：去引号、过禁词、按长度在标点处截断。"""
+    if not text:
+        return ""
+    t = text.strip().strip('"“”\'‘’')
+    t = _sanitize(t)
+    t = _truncate_at_punct(t, max_len)
+    return t
+
+
+def draft(comment_text: str, work_title: str = "", account_name: str = "") -> str:
+    """生成一条评论回复草稿。未配置 LLM 时抛 RuntimeError。"""
+    if not client.is_configured():
+        raise RuntimeError("AI 未配置（.env 里没有 LLM_API_KEY）")
+    prompt = (f"账号：{account_name or '本账号'}\n"
+              f"作品：{work_title or '（无标题）'}\n"
+              f"观众评论：{comment_text}\n"
+              "请给出一条回复。")
+    text = client.chat(prompt, system=SYSTEM)
+    return _clean_reply(text, 30)
+
+
 def draft_dm(sender: str, content: str, account_name: str = "",
              history: list | None = None) -> str:
-    """生成一条私信回复草稿（人工复制到平台 App 发送）。未配置 LLM 时抛 RuntimeError。"""
-    if not is_configured():
+    """生成一条私信回复草稿。未配置 LLM 时抛 RuntimeError。"""
+    if not client.is_configured():
         raise RuntimeError("AI 未配置（.env 里没有 LLM_API_KEY）")
     ctx = ""
     if history:
@@ -48,5 +64,5 @@ def draft_dm(sender: str, content: str, account_name: str = "",
               f"{ctx}"
               f"「{sender or '对方'}」最新私信：{content}\n"
               "请给出一条回复。")
-    text = chat(prompt, system=DM_SYSTEM).strip()
-    return text.strip('"“” ')[:160]
+    text = client.chat(prompt, system=DM_SYSTEM)
+    return _clean_reply(text, 60)

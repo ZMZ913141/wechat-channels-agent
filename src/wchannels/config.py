@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = ""
     LLM_MODEL: str = "deepseek-chat"
     LLM_BASE_URL: str = "https://api.deepseek.com/v1"
+    # 是否让 LLM 强制 JSON 输出（response_format=json_object）。
+    # DeepSeek / 通义 / 智谱 等兼容网关支持；不支持的网关留 False，
+    # 否则会报错。开启后 AI 填写的 JSON 解析更稳。
+    LLM_JSON_MODE: bool = False
 
     # 浏览器：默认空 -> 用 Playwright 自带 Chromium（已随项目安装，无需另装 Chrome）
     # 若本机已装 Chrome 且想用，可设 BROWSER_CHANNEL=chrome

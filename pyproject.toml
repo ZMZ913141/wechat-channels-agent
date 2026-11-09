@@ -1,6 +1,6 @@
 [project]
 name = "wchannels"
-version = "3.1.0"
+version = "3.3.0"
 description = "多平台（视频号/抖音/小红书）多用户视频发布工作台（本地部署）"
 requires-python = ">=3.11"
 dependencies = [

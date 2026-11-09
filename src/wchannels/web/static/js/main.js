@@ -12,7 +12,7 @@ import * as audit from './views/audit.js?v=3.21';
 import * as dashboard from './views/dashboard.js?v=3.27';
 import * as comments from './views/comments.js?v=3.27';
 import * as messages from './views/messages.js?v=3.27';
-import * as accounts from './views/accounts.js?v=3.24';
+import * as accounts from './views/accounts.js?v=3.25';
 import * as settings from './views/settings.js?v=3.28';
 
 const PAGES = {

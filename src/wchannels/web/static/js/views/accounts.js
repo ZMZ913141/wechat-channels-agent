@@ -10,6 +10,7 @@ export async function load() {
     <div class="section-head"><h2>账号管理</h2>
       <span class="hint">每个账号独立浏览器档案，互不串号；登录态过期需重新扫码</span>
       <div class="spacer"></div>
+      <button class="btn btn-ghost btn-sm" id="btn-probe-all">一键检测登录</button>
       <button class="btn btn-primary btn-sm" id="btn-add-acc">＋ 新增账号</button>
     </div>
     <div class="acc-grid stagger" id="acc-list"></div>`;
@@ -27,6 +28,7 @@ export async function load() {
         <span class="glyph">号</span>
         <p>还没有账号——点右上 <b>「＋ 新增账号」</b>，选平台后点「登录（扫码）」。</p>
       </div>`;
+    $('#btn-probe-all').disabled = true;
     return;
   }
   // 按平台分组展示，组内按名称排序；多号时不再混在一起
@@ -62,6 +64,7 @@ export async function load() {
     const acc = items.find(x => x.id === +card.dataset.id);
     btn.onclick = () => act(btn.dataset.act, acc);
   });
+  $('#btn-probe-all').onclick = () => probeAll(items);
 }
 
 async function act(kind, acc) {
@@ -76,7 +79,8 @@ async function act(kind, acc) {
         break;
       case 'probe': {
         const r = await api(`/accounts/${acc.id}/login-probe`, { method: 'POST' });
-        toast(r.logged_in ? '登录正常：' + r.nickname : '未登录或登录已失效，请点「登录（扫码）」重新扫码', !r.logged_in);
+        if (r.busy) { toast('账号正忙（有发布任务在跑），请稍后再检测'); break; }
+        toast(r.logged_in ? '登录正常：' + (r.nickname || '已登录') : '未登录或登录已失效，请点「登录（扫码）」重新扫码', !r.logged_in);
         break;
       }
       case 'edit': {
@@ -103,6 +107,42 @@ async function act(kind, acc) {
     }
   } catch (e) { toast(e.message, true); return; }
   load();
+}
+
+async function probeAll(items) {
+  const btn = $('#btn-probe-all');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  const total = items.length;
+  let done = 0;
+  const offline = [], busy = [];
+  for (const acc of items) {
+    btn.textContent = `检测中 ${done + 1}/${total}…`;
+    const card = $(`#page-accounts .acc-card[data-id="${acc.id}"]`);
+    const st = card && card.querySelector('.status');
+    if (st) { st.className = 'status running'; st.textContent = '检测中'; }
+    let cls = 'failed', label = '检测失败';
+    try {
+      const r = await api(`/accounts/${acc.id}/login-probe`, { method: 'POST' });
+      if (r.busy) { busy.push(acc.name); cls = 'skipped'; label = '账号忙'; }
+      else if (r.logged_in) { cls = 'success'; label = acc.status || 'active'; }
+      else { offline.push(acc.name); cls = 'failed'; label = 'logged_out'; }
+    } catch (e) {
+      offline.push(acc.name);
+    }
+    if (st) { st.className = 'status ' + cls; st.textContent = label; }
+    done++;
+  }
+  btn.disabled = false;
+  btn.textContent = '一键检测登录';
+  const okCnt = total - offline.length - busy.length;
+  if (offline.length) {
+    toast(`检测完成：${okCnt} 个正常，${offline.length} 个掉线（${offline.join('、')}），请点「登录（扫码）」重新扫码`, true);
+  } else if (busy.length) {
+    toast(`检测完成：${okCnt} 个正常，${busy.length} 个正忙跳过（${busy.join('、')}）`);
+  } else {
+    toast(`检测完成：全部 ${okCnt} 个账号登录正常`);
+  }
 }
 
 async function addAccount() {

@@ -9,6 +9,7 @@ from ...core import accounts as svc
 from ...config import settings
 from ...browser.loginprobe import probe_login, wait_login
 from ...browser.launcher import launch_context
+from ...browser.proclock import AccountLock, ProfileLock, LockBusy
 from ...browser.platforms import get_publisher
 
 router = APIRouter()
@@ -75,8 +76,20 @@ def login_probe(aid: int, session: Session = Depends(get_session),
     if not a:
         raise HTTPException(404, "账号不存在")
     profile = settings.profiles_dir / a.profile_dir
-    logged_in, nick = probe_login(profile, a.platform)
-    svc.detect_login(session, a, nick, logged_in)
+    # 与发布/巡检共用同一把档案锁：账号正在发布时不能同时打开该档案
+    a_lock, p_lock = AccountLock(a.id), ProfileLock(profile)
+    try:
+        a_lock.acquire()
+        p_lock.acquire()
+    except LockBusy:
+        return {"nickname": "", "logged_in": None, "busy": True,
+                "platform": a.platform}
+    try:
+        logged_in, nick = probe_login(profile, a.platform)
+        svc.detect_login(session, a, nick, logged_in)
+    finally:
+        a_lock.release()
+        p_lock.release()
     return {"nickname": nick, "logged_in": logged_in, "platform": a.platform}
 
 

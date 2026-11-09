@@ -1,4 +1,5 @@
 """账号管理：CRUD、分组、登录态健康度、档案路径。"""
+import secrets
 from sqlmodel import Session, select
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +32,7 @@ def create_account(session: Session, user_id: int, name: str, group: str = "", p
         name=name,
         group=group,
         platform=platform,
-        profile_dir=f"acc_{platform}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        profile_dir=f"acc_{platform}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(3)}",
         status=AccountStatus.ACTIVE.value,
     )
     session.add(acc)
